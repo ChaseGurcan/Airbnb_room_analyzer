@@ -205,7 +205,7 @@ def get_airbnb_images(url):
         and re.search(r'/pictures/', u)   # any pictures/ path
     ]
 
-    result = listing_photos[:20]
+    result = listing_photos
     print(f"  Found {len(result)} listing image(s).")
     return result, listing_details
 
@@ -453,7 +453,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     # ── Download and resize images once ──────────────────────────────────────
     loaded_urls = []
     image_parts = []   # (label_part, img_part) pairs
-    for url in image_urls[:14]:
+    for url in image_urls:
         try:
             r = requests.get(url, headers=dl_headers, timeout=15)
             if r.status_code == 200:
