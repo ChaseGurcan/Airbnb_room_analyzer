@@ -505,7 +505,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
 
     results_map = {}
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls[:22])}
+        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls)}
         for future in as_completed(futures):
             idx, url, data = future.result()
             if data:
