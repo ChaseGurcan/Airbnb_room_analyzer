@@ -277,52 +277,31 @@ STEP 3 - Verify counts before outputting:
 Count your bedrooms. Count your bathrooms. These MUST match the listing details provided.
 If the counts are off, re-examine the photos and correct your groupings before outputting.
 
-Return ONLY a valid JSON object - no markdown, no tasks, no descriptions beyond what is shown.
-DO NOT add a "tasks" field. DO NOT add any fields not in this schema.
+After identifying rooms, also generate a task checklist for each room.
+For each room generate EXACTLY {task_count} unique checklist items. Mix:
+1. General everyday actions a guest might do in that room (e.g. "turn on the TV", "brew a pot of coffee")
+2. Mess or damage scenarios a host would address after checkout (e.g. "wet towel on the floor", "grease on stovetop")
+Aim for 60% everyday actions, 40% mess/damage. Items should be 3-8 words, specific to the room. NO candle wax items.
 
-{
+Return ONLY a valid JSON object - no markdown - using this schema:
+
+{{
   "property_description": "one-line description",
   "rooms": [
-    {
+    {{
       "name": "Room Name",
       "emoji": "🏠",
       "photo_index": 0,
       "photo_indices": [
-        {"index": 0, "confidence": 95},
-        {"index": 2, "confidence": 80}
-      ]
-    }
+        {{"index": 0, "confidence": 95}},
+        {{"index": 2, "confidence": 80}}
+      ],
+      "tasks": ["item 1", "item 2"]
+    }}
   ]
-}
+}}
 photo_index and all photo_indices index values MUST be label numbers you actually saw.
-STOP after the closing } - do not add anything else."""
-
-
-TASKS_PROMPT_TEMPLATE = """You are generating activity checklists for each room in an Airbnb vacation rental.
-
-For each room listed below, generate EXACTLY {task_count} unique items. Mix two types:
-1. General everyday actions a guest might do in that room (e.g. "turn on the TV", "fill the Brita filter", "put food in the dog bowl", "turn on a lamp", "brew a pot of coffee")
-2. Mess or damage scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop")
-
-Aim for roughly 60% everyday actions and 40% mess/damage scenarios. Both types should be specific to that room.
-
-Rules:
-- {task_count} items minimum per room
-- Each item is a short phrase, 3-8 words
-- Only realistic scenarios for that specific room type
-- NO candle wax items
-- At least 10 items per room should be creative or unusual but plausible
-- Do not repeat items across rooms
-
-Rooms to generate for:
-{room_list}
-
-Return ONLY a valid JSON object - no markdown - using this schema:
-{{
-  "rooms": [
-    {{"name": "Room Name", "tasks": ["item 1", "item 2", ...]}}
-  ]
-}}"""
+STOP after the closing }} - do not add anything else."""
 
 
 def _count_room_type(rooms, keyword):
@@ -489,8 +468,8 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     baths = (listing_details or {}).get("bathrooms")
     summary = (listing_details or {}).get("summary", "")
 
-    def _build_vision_prompt(hint=""):
-        p = VISION_PROMPT
+    def _build_prompt(hint=""):
+        p = VISION_PROMPT.format(task_count=task_count)
         detail_lines = []
         if summary:
             detail_lines.append(f'Listing summary: "{summary}"')
@@ -516,7 +495,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 img = Image.open(BytesIO(r.content))
                 if img.mode in ("RGBA", "P", "CMYK"):
                     img = img.convert("RGB")
-                img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+                img.thumbnail((512, 512), Image.Resampling.LANCZOS)
                 buf = BytesIO()
                 img.save(buf, format="JPEG", quality=85)
                 return idx, url, buf.getvalue()
@@ -550,16 +529,13 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         )
 
     def _run_vision(hint=""):
-        p = [genai_types.Part(text=_build_vision_prompt(hint))]
+        p = [genai_types.Part(text=_build_prompt(hint))]
         for label, img in image_parts:
             p.append(label)
             p.append(img)
-        print(f"  [Vision] Sending {len(loaded_urls)} images to Gemini…")
+        print(f"  [1/1] Sending {len(loaded_urls)} images to Gemini (combined call)…")
         raw = _strip_fences(_gemini_call(client, models, p, max_tokens=32768))
-        print(f"  Vision response (first 500 chars):\n{raw[:500]}")
-        # Remove any stray 'tasks' field Gemini may have added - it truncates the JSON
-        raw = _strip_tasks_field(raw)
-        print(f"  Vision response after task-strip (first 500 chars):\n{raw[:500]}")
+        print(f"  Response (first 500 chars):\n{raw[:500]}")
         return _try_parse(raw)
 
     # ── Vision call with up to 2 internal retries if counts mismatch ─────────
@@ -581,9 +557,6 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         vision_result = _run_vision(hint)
 
     rooms = vision_result.get("rooms", [])
-    # Strip any stray "tasks" key Gemini may have added to the vision response
-    for r in rooms:
-        r.pop("tasks", None)
     if not rooms:
         raise ValueError("Gemini could not identify any rooms in the listing photos.")
 
@@ -615,21 +588,6 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 photo_urls.append(loaded_urls[idx])
                 seen_idx.add(idx)
         room["photo_urls"] = photo_urls
-
-    # ── CALL 2: Text-only - generate 50 mess/damage items per room ────────────
-    room_list = "\n".join(f"- {r['name']}" for r in rooms)
-    tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
-
-    text_parts = [genai_types.Part(text=tasks_prompt)]
-    print(f"  [Call 2/2] Generating tasks for {len(rooms)} room(s)…")
-    raw2 = _strip_fences(_gemini_call(client, models, text_parts, max_tokens=16384))
-    print(f"  Tasks response (first 500 chars):\n{raw2[:500]}")
-    tasks_result = _try_parse(raw2)
-
-    # Merge tasks into rooms by name
-    tasks_by_name = {r["name"]: r.get("tasks", []) for r in tasks_result.get("rooms", [])}
-    for room in rooms:
-        room["tasks"] = tasks_by_name.get(room["name"], [])
 
     return {
         "property_description": vision_result.get("property_description", ""),
