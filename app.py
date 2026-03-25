@@ -281,7 +281,7 @@ After identifying rooms, also generate a task checklist for each room.
 For each room generate EXACTLY {task_count} unique checklist items. Mix:
 1. General everyday actions a guest might do in that room (e.g. "turn on the TV", "brew a pot of coffee")
 2. Mess or damage scenarios a host would address after checkout (e.g. "wet towel on the floor", "grease on stovetop")
-Aim for 60% everyday actions, 40% mess/damage. Items should be 3-8 words, specific to the room. NO candle wax items.
+Aim for 80% mess/damage scenarios and 20% random activities that can be done in that room. Items should be 3-8 words, specific to the room. NO candle wax items.
 
 Return ONLY a valid JSON object - no markdown - using this schema:
 
