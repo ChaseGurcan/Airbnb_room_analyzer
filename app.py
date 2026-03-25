@@ -587,14 +587,14 @@ def serve_logo():
 def analyze():
     body = request.get_json(force=True)
     airbnb_url = (body.get("url") or "").strip()
-    api_key    = (body.get("api_key") or "").strip()
+    api_key    = os.environ.get("GEMINI_API_KEY", "")
 
     if not airbnb_url:
         return jsonify({"error": "Please provide an Airbnb URL."}), 400
     if "airbnb.com" not in airbnb_url:
         return jsonify({"error": "That doesn't look like an Airbnb URL."}), 400
     if not api_key:
-        return jsonify({"error": "Please provide your Gemini API key."}), 400
+        return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
 
     try:
         print(f"\n[1/4] Fetching listing: {airbnb_url}")

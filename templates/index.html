@@ -130,30 +130,6 @@
 
   <main class="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-    <!-- API Key Card -->
-    <div id="apiCard" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-      <div class="flex items-center gap-3 mb-4">
-        <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-sm font-bold text-red-500">1</div>
-        <h2 class="font-semibold text-gray-700">Gemini API Key</h2>
-        <span id="keyStatus" class="ml-auto text-xs text-gray-400"></span>
-      </div>
-      <div class="flex gap-2">
-        <input id="apiKeyInput" type="password" placeholder="AIza…"
-          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
-        />
-        <button onclick="saveKey()"
-          class="brand-btn text-white text-sm font-medium px-5 py-2.5 rounded-xl">
-          Save
-        </button>
-      </div>
-      <p class="text-xs text-gray-400 mt-2">
-        Your key is saved in your browser only — never sent anywhere except Google's API.
-        Get one free at
-        <a href="https://aistudio.google.com/app/apikey" target="_blank"
-           class="text-red-500 underline">aistudio.google.com</a>.
-      </p>
-    </div>
-
     <!-- URL Card -->
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
       <div class="flex items-center gap-3 mb-4">
@@ -258,28 +234,6 @@
   </style>
 
 <script>
-// ── API Key ─────────────────────────────────────────────────────────────────
-
-const KEY_STORAGE = 'gemini_api_key';
-
-function saveKey() {
-  const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) { alert('Please enter an API key first.'); return; }
-  localStorage.setItem(KEY_STORAGE, val);
-  document.getElementById('keyStatus').textContent = '✅ Saved';
-  document.getElementById('keyStatus').classList.remove('text-gray-400');
-  document.getElementById('keyStatus').classList.add('text-green-500');
-}
-
-function loadKey() {
-  const saved = localStorage.getItem(KEY_STORAGE);
-  if (saved) {
-    document.getElementById('apiKeyInput').value = saved;
-    document.getElementById('keyStatus').textContent = '✅ Key loaded';
-    document.getElementById('keyStatus').classList.add('text-green-500');
-  }
-}
-
 // ── Analyze ─────────────────────────────────────────────────────────────────
 
 let loadingTimer = null;
@@ -298,12 +252,9 @@ function setLoadingStep(step) {
 }
 
 async function analyze() {
-  const url    = document.getElementById('urlInput').value.trim();
-  const apiKey = localStorage.getItem(KEY_STORAGE) ||
-                 document.getElementById('apiKeyInput').value.trim();
+  const url = document.getElementById('urlInput').value.trim();
 
-  if (!apiKey) { showError('Please enter and save your Gemini API key first.'); return; }
-  if (!url)    { showError('Please paste an Airbnb listing URL.'); return; }
+  if (!url) { showError('Please paste an Airbnb listing URL.'); return; }
 
   // UI state
   hideError();
@@ -321,7 +272,7 @@ async function analyze() {
     const res = await fetch('/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, api_key: apiKey }),
+      body: JSON.stringify({ url }),
     });
 
     clearTimeout(loadingTimer);
