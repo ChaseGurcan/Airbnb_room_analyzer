@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Airbnb Room Analyzer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand: #FF5A5F; --brand-dark: #d94045; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    main, header { position: relative; z-index: 1; }
+
+    .brand-btn {
+      background: var(--brand);
+      transition: background .2s, transform .1s;
+    }
+    .brand-btn:hover { background: var(--brand-dark); }
+    .brand-btn:active { transform: scale(.98); }
+    .brand-btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+
+    /* spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid #fecaca;
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    /* room card accordion */
+    .room-body { max-height: 0; overflow: hidden; transition: max-height .4s ease; }
+    .room-body.open { max-height: 2000px; }
+    .chevron { transition: transform .3s; }
+    .chevron.open { transform: rotate(180deg); }
+
+    /* fade-in for results */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .room-card { animation: fadeUp .35s ease both; }
+
+    /* checkbox custom style */
+    .task-checkbox:checked + .task-label {
+      text-decoration: line-through;
+      color: #9ca3af;
+    }
+    .task-item:hover { background: #fef2f2; border-radius: .375rem; }
+
+    /* progress steps */
+    .step-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #e5e7eb;
+      transition: background .3s;
+    }
+    .step-dot.active { background: var(--brand); }
+    .step-dot.done   { background: #22c55e; }
+
+    input:focus, textarea:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(255,90,95,.25);
+      border-color: var(--brand) !important;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen bg-gray-50">
+
+  <!-- Background basketweave logo (built via canvas to allow image size ≠ repeat interval) -->
+  <div id="bg-logo" style="position:fixed;inset:0;z-index:0;pointer-events:none;opacity:0.5;"></div>
+  <script>
+    (function () {
+      const MAX_DIM   = 80;    // longest edge of the rendered logo (px)
+      const TILE_SIZE = 220;   // repeat-cell — controls spacing between logos
+
+      const img = new Image();
+      img.onload = function () {
+        // Scale proportionally so the longest edge == MAX_DIM
+        const scale = Math.min(MAX_DIM / img.naturalWidth, MAX_DIM / img.naturalHeight);
+        const drawW = img.naturalWidth  * scale;
+        const drawH = img.naturalHeight * scale;
+
+        const ox = (TILE_SIZE - drawW) / 2;
+        const oy = (TILE_SIZE - drawH) / 2;
+
+        function makeTile(tint) {
+          const c = document.createElement('canvas');
+          c.width = c.height = TILE_SIZE;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img, ox, oy, drawW, drawH);
+          if (tint) {
+            // overlay lavender only over existing pixels
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = 'rgba(180, 130, 255, 0.65)';
+            ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+          }
+          return c.toDataURL('image/png');
+        }
+
+        const tile        = makeTile(false);   // original
+        const tileLavender = makeTile(true);   // lavender tint
+
+        // Two-layer basketweave: second layer offset by half the tile
+        const half = TILE_SIZE / 2;
+        const bg = document.getElementById('bg-logo');
+        bg.style.backgroundImage    = `url(${tile}), url(${tileLavender})`;
+        bg.style.backgroundSize     = `${TILE_SIZE}px ${TILE_SIZE}px, ${TILE_SIZE}px ${TILE_SIZE}px`;
+        bg.style.backgroundPosition = `0 0, ${half}px ${half}px`;
+        bg.style.backgroundRepeat   = 'repeat, repeat';
+      };
+      img.src = '/logo';   // proxied through Flask — no CORS issues
+    })();
+  </script>
+
+  <!-- Header -->
+  <header class="bg-white shadow-sm sticky top-0 z-20">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">🏠</span>
+        <span class="font-bold text-gray-800 text-lg">Airbnb Room Analyzer</span>
+      </div>
+      <span class="text-xs text-gray-400 hidden sm:block">Powered by Google Gemini</span>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+
+    <!-- API Key Card -->
+    <div id="apiCard" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-sm font-bold text-red-500">1</div>
+        <h2 class="font-semibold text-gray-700">Gemini API Key</h2>
+        <span id="keyStatus" class="ml-auto text-xs text-gray-400"></span>
+      </div>
+      <div class="flex gap-2">
+        <input id="apiKeyInput" type="password" placeholder="AIza…"
+          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
+        />
+        <button onclick="saveKey()"
+          class="brand-btn text-white text-sm font-medium px-5 py-2.5 rounded-xl">
+          Save
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mt-2">
+        Your key is saved in your browser only — never sent anywhere except Google's API.
+        Get one free at
+        <a href="https://aistudio.google.com/app/apikey" target="_blank"
+           class="text-red-500 underline">aistudio.google.com</a>.
+      </p>
+    </div>
+
+    <!-- URL Card -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-sm font-bold text-red-500">2</div>
+        <h2 class="font-semibold text-gray-700">Airbnb Listing URL</h2>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <input id="urlInput" type="url"
+          placeholder="https://www.airbnb.com/rooms/12345678"
+          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
+        />
+        <button id="analyzeBtn" onclick="analyze()"
+          class="brand-btn text-white text-sm font-semibold px-6 py-2.5 rounded-xl whitespace-nowrap">
+          🔍 Analyze Rooms
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mt-2">
+        Paste the full URL from your browser's address bar.
+        The app will download the listing photos and identify every room.
+      </p>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loadingCard" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+      <div class="flex flex-col items-center gap-4">
+        <div class="spinner"></div>
+        <p id="loadingText" class="text-gray-600 font-medium text-sm">Fetching listing photos…</p>
+        <!-- progress dots -->
+        <div class="flex items-center gap-3 mt-1">
+          <div class="flex items-center gap-1.5">
+            <div id="dot1" class="step-dot active"></div>
+            <span class="text-xs text-gray-400">Fetching images</span>
+          </div>
+          <div class="w-6 h-px bg-gray-200"></div>
+          <div class="flex items-center gap-1.5">
+            <div id="dot2" class="step-dot"></div>
+            <span class="text-xs text-gray-400">Identifying rooms</span>
+          </div>
+          <div class="w-6 h-px bg-gray-200"></div>
+          <div class="flex items-center gap-1.5">
+            <div id="dot3" class="step-dot"></div>
+            <span class="text-xs text-gray-400">Building checklists</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Banner -->
+    <div id="errorBanner" class="hidden bg-red-50 border border-red-200 rounded-2xl p-4 flex gap-3 items-start">
+      <span class="text-red-500 text-xl mt-0.5">⚠️</span>
+      <div>
+        <p class="text-red-700 font-medium text-sm">Something went wrong</p>
+        <p id="errorText" class="text-red-600 text-sm mt-1"></p>
+      </div>
+      <button onclick="hideError()" class="ml-auto text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden space-y-4">
+
+      <!-- Summary bar -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-gray-800" id="propDescription"></h2>
+          <p class="text-sm text-gray-400" id="summaryMeta"></p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="expandAll()" class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
+            Expand All
+          </button>
+          <button onclick="window.print()" class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
+            🖨 Print
+          </button>
+          <button onclick="resetAll()" class="text-xs text-white brand-btn rounded-lg px-3 py-1.5">
+            ↺ New Search
+          </button>
+        </div>
+      </div>
+
+      <!-- Verification badge -->
+      <div id="verificationBadge" class="hidden rounded-xl px-4 py-3 text-sm flex items-start gap-2"></div>
+
+      <!-- Room cards injected here -->
+      <div id="roomList" class="space-y-3"></div>
+
+      <p class="text-xs text-center text-gray-300 pt-2">
+        Checklist generated by Google Gemini based on listing photos.
+        Results may vary depending on photo availability.
+      </p>
+    </div>
+
+  </main>
+
+  <!-- Print styles -->
+  <style>
+    @media print {
+      header, #apiCard, #urlInput, #analyzeBtn, .room-body { display: block !important; max-height: none !important; }
+      button, input, p.text-xs, .brand-btn { display: none !important; }
+      .room-card { break-inside: avoid; }
+      body { background: white; }
+    }
+  </style>
+
+<script>
+// ── API Key ─────────────────────────────────────────────────────────────────
+
+const KEY_STORAGE = 'gemini_api_key';
+
+function saveKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val) { alert('Please enter an API key first.'); return; }
+  localStorage.setItem(KEY_STORAGE, val);
+  document.getElementById('keyStatus').textContent = '✅ Saved';
+  document.getElementById('keyStatus').classList.remove('text-gray-400');
+  document.getElementById('keyStatus').classList.add('text-green-500');
+}
+
+function loadKey() {
+  const saved = localStorage.getItem(KEY_STORAGE);
+  if (saved) {
+    document.getElementById('apiKeyInput').value = saved;
+    document.getElementById('keyStatus').textContent = '✅ Key loaded';
+    document.getElementById('keyStatus').classList.add('text-green-500');
+  }
+}
+
+// ── Analyze ─────────────────────────────────────────────────────────────────
+
+let loadingTimer = null;
+
+function setLoadingStep(step) {
+  const msgs = [
+    'Fetching listing photos…',
+    'Identifying rooms with Gemini AI…',
+    'Building task checklists…',
+  ];
+  document.getElementById('loadingText').textContent = msgs[step - 1] || msgs[0];
+  ['dot1','dot2','dot3'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    el.className = 'step-dot ' + (i + 1 < step ? 'done' : i + 1 === step ? 'active' : '');
+  });
+}
+
+async function analyze() {
+  const url    = document.getElementById('urlInput').value.trim();
+  const apiKey = localStorage.getItem(KEY_STORAGE) ||
+                 document.getElementById('apiKeyInput').value.trim();
+
+  if (!apiKey) { showError('Please enter and save your Gemini API key first.'); return; }
+  if (!url)    { showError('Please paste an Airbnb listing URL.'); return; }
+
+  // UI state
+  hideError();
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('loadingCard').classList.remove('hidden');
+  document.getElementById('analyzeBtn').disabled = true;
+
+  setLoadingStep(1);
+
+  // Fake progress steps for UX while we wait
+  loadingTimer = setTimeout(() => setLoadingStep(2), 4000);
+  const timer2 = setTimeout(() => setLoadingStep(3), 12000);
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, api_key: apiKey }),
+    });
+
+    clearTimeout(loadingTimer);
+    clearTimeout(timer2);
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Unknown server error');
+    }
+
+    renderResults(data);
+
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    document.getElementById('loadingCard').classList.add('hidden');
+    document.getElementById('analyzeBtn').disabled = false;
+  }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function renderResults(data) {
+  const { image_count, data: analysis } = data;
+  const { property_description, rooms, verification } = analysis;
+
+  // Verification badge
+  const badge = document.getElementById('verificationBadge');
+  if (verification && (verification.expected_bedrooms !== null || verification.expected_bathrooms !== null)) {
+    badge.classList.remove('hidden');
+    if (verification.passed) {
+      badge.className = 'rounded-xl px-4 py-3 text-sm flex items-start gap-2 bg-green-50 border border-green-200 text-green-800';
+      badge.innerHTML = `<span class="text-lg">✅</span><div><strong>Verification passed</strong> — ${verification.found_bedrooms} bedroom(s) and ${verification.found_bathrooms} bathroom(s) match the listing.</div>`;
+    } else {
+      const retried = verification.retried ? ' (re-analyzed once)' : '';
+      badge.className = 'rounded-xl px-4 py-3 text-sm flex items-start gap-2 bg-yellow-50 border border-yellow-200 text-yellow-800';
+      badge.innerHTML = `<span class="text-lg">⚠️</span><div><strong>Verification note${retried}:</strong> ${verification.issues.join('; ')}. The listing may have rooms not visible in the photos.</div>`;
+    }
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  document.getElementById('propDescription').textContent =
+    property_description || 'Vacation Rental';
+
+  document.getElementById('summaryMeta').textContent =
+    `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''}`;
+
+  // Wipe previous results completely before rendering new ones
+  const list = document.getElementById('roomList');
+  list.innerHTML = '';
+  document.getElementById('verificationBadge').classList.add('hidden');
+
+  rooms.forEach((room, idx) => {
+    const card = buildRoomCard(room, idx);
+    list.appendChild(card);
+  });
+
+  document.getElementById('results').classList.remove('hidden');
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function buildRoomCard(room, idx) {
+  const card = document.createElement('div');
+  card.className = 'room-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden';
+  card.style.animationDelay = `${idx * 60}ms`;
+
+  const totalTasks = room.tasks.length;
+
+  card.innerHTML = `
+    ${room.photo_urls && room.photo_urls.length
+      ? `<div class="flex gap-2 px-5 pt-4 overflow-x-auto pb-1">
+           ${room.photo_urls.map((url, i) => `
+             <img src="${url}" alt="${escHtml(room.name)} photo ${i+1}"
+               class="h-32 w-32 rounded-xl object-cover shrink-0 shadow-sm" />
+           `).join('')}
+         </div>`
+      : `<div class="flex items-center justify-center pt-5 pb-1">
+           <span class="text-7xl opacity-30">${room.emoji || '🏠'}</span>
+         </div>`
+    }
+    <button onclick="toggleRoom(this)"
+      class="w-full flex items-center gap-3 px-5 py-4 hover:bg-gray-50 transition-colors text-left">
+      <span class="text-2xl">${room.emoji || '🏠'}</span>
+      <div class="flex-1 min-w-0">
+        <span class="font-semibold text-gray-800">${escHtml(room.name)}</span>
+        <span class="ml-2 text-xs text-gray-400">${totalTasks} tasks</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="progress-label text-xs text-gray-400">0 / ${totalTasks}</span>
+        <svg class="chevron w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </div>
+    </button>
+
+    <div class="room-body border-t border-gray-50">
+      <ul class="px-5 py-3 space-y-1">
+        ${room.tasks.map((task, ti) => `
+          <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+              onclick="toggleTask(this, ${totalTasks})">
+            <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+            <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+          </li>
+        `).join('')}
+      </ul>
+      <div class="px-5 pb-4 flex gap-2">
+        <button onclick="checkAll(this, ${totalTasks})"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          ✓ Check All
+        </button>
+        <button onclick="uncheckAll(this)"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          ☐ Uncheck All
+        </button>
+        <button onclick="copyTasks(this)"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          📋 Copy
+        </button>
+      </div>
+    </div>
+  `;
+
+  return card;
+}
+
+// ── Room interactions ────────────────────────────────────────────────────────
+
+function toggleRoom(btn) {
+  const body    = btn.nextElementSibling;
+  const chevron = btn.querySelector('.chevron');
+  body.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+
+function toggleTask(li, total) {
+  const cb = li.querySelector('.task-checkbox');
+  cb.checked = !cb.checked;
+  updateProgress(li.closest('.room-body'), total);
+}
+
+function updateProgress(body, total) {
+  const checked = body.querySelectorAll('.task-checkbox:checked').length;
+  const label   = body.previousElementSibling.querySelector('.progress-label');
+  if (label) label.textContent = `${checked} / ${total}`;
+}
+
+function checkAll(btn, total) {
+  const body = btn.closest('.room-body');
+  body.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = true);
+  body.querySelectorAll('.task-label').forEach(l => {
+    l.style.textDecoration = 'line-through';
+    l.style.color = '#9ca3af';
+  });
+  updateProgress(body, total);
+}
+
+function uncheckAll(btn) {
+  const body = btn.closest('.room-body');
+  const total = body.querySelectorAll('.task-checkbox').length;
+  body.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false);
+  body.querySelectorAll('.task-label').forEach(l => {
+    l.style.textDecoration = '';
+    l.style.color = '';
+  });
+  updateProgress(body, total);
+}
+
+function copyTasks(btn) {
+  const body  = btn.closest('.room-body');
+  const tasks = [...body.querySelectorAll('.task-label')].map(l => '• ' + l.textContent);
+  const header = body.previousElementSibling.querySelector('.font-semibold').textContent;
+  navigator.clipboard.writeText(header + '\n' + tasks.join('\n')).then(() => {
+    btn.textContent = '✅ Copied!';
+    setTimeout(() => btn.textContent = '📋 Copy', 2000);
+  });
+}
+
+function expandAll() {
+  document.querySelectorAll('.room-body').forEach(b => b.classList.add('open'));
+  document.querySelectorAll('.chevron').forEach(c => c.classList.add('open'));
+}
+
+// ── Error / Reset ────────────────────────────────────────────────────────────
+
+function showError(msg) {
+  document.getElementById('errorText').textContent = msg;
+  document.getElementById('errorBanner').classList.remove('hidden');
+}
+
+function hideError() {
+  document.getElementById('errorBanner').classList.add('hidden');
+}
+
+function resetAll() {
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('urlInput').value = '';
+  document.getElementById('urlInput').focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Enter key shortcut ───────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadKey();
+  document.getElementById('urlInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') analyze();
+  });
+});
+</script>
+</body>
+</html>
