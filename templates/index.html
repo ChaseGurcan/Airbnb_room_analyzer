@@ -239,6 +239,8 @@
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
 let currentJobId = null;
+let roomTasksMap = {};   // roomName -> full task array
+let taskCountSetting = 25;
 
 // ── Analyze ─────────────────────────────────────────────────────────────────
 
@@ -316,6 +318,11 @@ async function analyze() {
 function renderResults(data, elapsed) {
   const { image_count, data: analysis } = data;
   const { property_description, rooms, verification } = analysis;
+
+  // Store full task lists and task count for offline randomization
+  roomTasksMap = {};
+  taskCountSetting = analysis.task_count || parseInt(document.getElementById('taskCountInput').value) || 25;
+  rooms.forEach(room => { roomTasksMap[room.name] = room.tasks || []; });
 
   // Verification badge
   const badge = document.getElementById('verificationBadge');
@@ -413,45 +420,41 @@ function buildRoomCard(room, idx) {
   return card;
 }
 
-async function randomizeTasks(btn, roomName) {
-  const body     = btn.closest('.room-body');
-  const taskList = body.querySelector('.task-list');
+function randomizeTasks(btn, roomName) {
+  const body       = btn.closest('.room-body');
+  const taskList   = body.querySelector('.task-list');
   const actionBtns = body.querySelector('.action-btns');
 
-  // Collect previously shown tasks to exclude
-  const prevTasks = [...taskList.querySelectorAll('.task-label')].map(l => l.textContent);
+  const allTasks  = roomTasksMap[roomName] || [];
+  const prevTasks = new Set([...taskList.querySelectorAll('.task-label')].map(l => l.textContent));
 
-  btn.disabled = true;
-  btn.textContent = 'Loading…';
+  let available = allTasks.filter(t => !prevTasks.has(t));
+  if (available.length < taskCountSetting) available = allTasks;  // reset pool if exhausted
 
-  try {
-    const res = await fetch('/randomize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: currentJobId, room_name: roomName, exclude: prevTasks }),
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+  // Pick count based on taskCountSetting
+  const count = taskCountSetting < 11
+    ? Math.min(taskCountSetting, available.length)
+    : Math.min(7 + Math.floor(Math.random() * 5), available.length);  // 7-11
 
-    const tasks = data.tasks;
-    taskList.innerHTML = tasks.map(task => `
-      <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-          onclick="toggleTask(this, ${tasks.length})">
-        <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
-        <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
-      </li>
-    `).join('');
-
-    taskList.classList.remove('hidden');
-    actionBtns.classList.remove('hidden');
-    // Update checkAll total
-    actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
-  } catch (err) {
-    btn.textContent = 'Error — try again';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🎲 Randomize Tasks';
+  // Fisher-Yates shuffle then slice
+  const pool = [...available];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
+  const tasks = pool.slice(0, count);
+
+  taskList.innerHTML = tasks.map(task => `
+    <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+        onclick="toggleTask(this, ${tasks.length})">
+      <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+      <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+    </li>
+  `).join('');
+
+  taskList.classList.remove('hidden');
+  actionBtns.classList.remove('hidden');
+  actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
 }
 
 // ── Room interactions ────────────────────────────────────────────────────────
