@@ -6,6 +6,7 @@ import time
 import threading
 import webbrowser
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
@@ -113,19 +114,19 @@ def get_airbnb_images(url):
         try:
             # Warm up: visit homepage first - listener NOT active yet
             page.goto("https://www.airbnb.com", wait_until="domcontentloaded", timeout=20_000)
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(500)
 
             # Start collecting image URLs ONLY from the actual listing page
             page.on("response", lambda r: seen_urls.add(r.url) if ("muscache.com" in r.url and "/pictures/" in r.url) else None)
 
             # Navigate to the listing
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(1500)
 
             # Scroll gradually to trigger lazy-load
             for pct in [0.25, 0.5, 0.75, 1.0]:
                 page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {pct})")
-                page.wait_for_timeout(800)
+                page.wait_for_timeout(400)
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(1000)
 
@@ -140,7 +141,7 @@ def get_airbnb_images(url):
                     btn = page.query_selector(selector)
                     if btn:
                         btn.click()
-                        page.wait_for_timeout(2500)
+                        page.wait_for_timeout(1000)
                         break
                 except Exception:
                     pass
@@ -450,10 +451,9 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             p += f"\n\nCORRECTION NEEDED: {hint} Re-examine every photo carefully."
         return p
 
-    # ── Download and resize images once ──────────────────────────────────────
-    loaded_urls = []
-    image_parts = []   # (label_part, img_part) pairs
-    for url in image_urls:
+    # ── Download and resize images in parallel ────────────────────────────────
+    def _download_image(args):
+        idx, url = args
         try:
             r = requests.get(url, headers=dl_headers, timeout=15)
             if r.status_code == 200:
@@ -463,14 +463,29 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
                 buf = BytesIO()
                 img.save(buf, format="JPEG", quality=85)
-                idx = len(loaded_urls)
-                image_parts.append((
-                    genai_types.Part(text=f"[Photo {idx}]"),
-                    genai_types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"),
-                ))
-                loaded_urls.append(url)
+                return idx, url, buf.getvalue()
         except Exception as e:
             print(f"  [warn] could not load image {url}: {e}")
+        return idx, url, None
+
+    results_map = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls)}
+        for future in as_completed(futures):
+            idx, url, data = future.result()
+            if data:
+                results_map[idx] = (url, data)
+
+    loaded_urls = []
+    image_parts = []
+    for idx in sorted(results_map):
+        url, data = results_map[idx]
+        label_idx = len(loaded_urls)
+        image_parts.append((
+            genai_types.Part(text=f"[Photo {label_idx}]"),
+            genai_types.Part.from_bytes(data=data, mime_type="image/jpeg"),
+        ))
+        loaded_urls.append(url)
 
     if not loaded_urls:
         raise ValueError(
