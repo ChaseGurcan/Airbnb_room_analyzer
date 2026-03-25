@@ -710,7 +710,7 @@ def analyze():
     if not api_key:
         return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
 
-    task_count = max(10, min(100, int(body.get("task_count", 25))))
+    task_count = max(1, min(100, int(body.get("task_count", 25))))
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending"}
     threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key, task_count), daemon=True).start()
