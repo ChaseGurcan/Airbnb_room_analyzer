@@ -233,6 +233,9 @@
   </style>
 
 <script>
+// ── State ────────────────────────────────────────────────────────────────────
+let currentJobId = null;
+
 // ── Analyze ─────────────────────────────────────────────────────────────────
 
 let loadingTimer = null;
@@ -287,6 +290,7 @@ async function analyze() {
       if (pollData.status === 'done') {
         clearTimeout(loadingTimer);
         clearTimeout(timer2);
+        currentJobId = jobId;
         renderResults(pollData);
         break;
       }
@@ -347,63 +351,131 @@ function buildRoomCard(room, idx) {
   card.className = 'room-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden';
   card.style.animationDelay = `${idx * 60}ms`;
 
+  const isBedroom = room.name.toLowerCase().includes('bedroom');
   const totalTasks = room.tasks.length;
 
-  card.innerHTML = `
-    ${room.photo_urls && room.photo_urls.length
-      ? `<div class="flex gap-2 px-5 pt-4 overflow-x-auto pb-1">
-           ${room.photo_urls.map((url, i) => `
-             <img src="${url}" alt="${escHtml(room.name)} photo ${i+1}"
-               class="h-32 w-32 rounded-xl object-cover shrink-0 shadow-sm" />
-           `).join('')}
-         </div>`
-      : `<div class="flex items-center justify-center pt-5 pb-1">
-           <span class="text-7xl opacity-30">${room.emoji || '🏠'}</span>
-         </div>`
-    }
+  const photos = room.photo_urls && room.photo_urls.length
+    ? `<div class="flex gap-2 px-5 pt-4 overflow-x-auto pb-1">
+         ${room.photo_urls.map((url, i) => `
+           <img src="${url}" alt="${escHtml(room.name)} photo ${i+1}"
+             class="h-32 w-32 rounded-xl object-cover shrink-0 shadow-sm" />
+         `).join('')}
+       </div>`
+    : `<div class="flex items-center justify-center pt-5 pb-1">
+         <span class="text-7xl opacity-30">${room.emoji || '🏠'}</span>
+       </div>`;
+
+  const header = `
     <button onclick="toggleRoom(this)"
       class="w-full flex items-center gap-3 px-5 py-4 hover:bg-gray-50 transition-colors text-left">
       <span class="text-2xl">${room.emoji || '🏠'}</span>
       <div class="flex-1 min-w-0">
         <span class="font-semibold text-gray-800">${escHtml(room.name)}</span>
-        <span class="ml-2 text-xs text-gray-400">${totalTasks} tasks</span>
+        ${isBedroom
+          ? `<span class="ml-2 text-xs text-gray-400">${totalTasks} tasks available</span>`
+          : `<span class="ml-2 text-xs text-gray-400">${totalTasks} tasks</span>`}
       </div>
       <div class="flex items-center gap-3">
-        <span class="progress-label text-xs text-gray-400">0 / ${totalTasks}</span>
+        ${isBedroom ? '' : `<span class="progress-label text-xs text-gray-400">0 / ${totalTasks}</span>`}
         <svg class="chevron w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </div>
-    </button>
+    </button>`;
 
-    <div class="room-body border-t border-gray-50">
-      <ul class="px-5 py-3 space-y-1">
-        ${room.tasks.map((task, ti) => `
-          <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-              onclick="toggleTask(this, ${totalTasks})">
-            <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
-            <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
-          </li>
-        `).join('')}
-      </ul>
-      <div class="px-5 pb-4 flex gap-2">
-        <button onclick="checkAll(this, ${totalTasks})"
-          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-          ✓ Check All
-        </button>
-        <button onclick="uncheckAll(this)"
-          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-          ☐ Uncheck All
-        </button>
-        <button onclick="copyTasks(this)"
-          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-          📋 Copy
-        </button>
-      </div>
-    </div>
-  `;
+  const body = isBedroom
+    ? `<div class="room-body border-t border-gray-50">
+         <div class="px-5 py-4">
+           <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
+             class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
+             🎲 Randomize Tasks
+           </button>
+         </div>
+         <ul class="task-list px-5 space-y-1 hidden"></ul>
+         <div class="px-5 pb-4 action-btns hidden flex gap-2">
+           <button onclick="checkAll(this, 0)"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             ✓ Check All
+           </button>
+           <button onclick="uncheckAll(this)"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             ☐ Uncheck All
+           </button>
+           <button onclick="copyTasks(this)"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             📋 Copy
+           </button>
+         </div>
+       </div>`
+    : `<div class="room-body border-t border-gray-50">
+         <ul class="px-5 py-3 space-y-1">
+           ${room.tasks.map(task => `
+             <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+                 onclick="toggleTask(this, ${totalTasks})">
+               <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+               <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+             </li>
+           `).join('')}
+         </ul>
+         <div class="px-5 pb-4 flex gap-2">
+           <button onclick="checkAll(this, ${totalTasks})"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             ✓ Check All
+           </button>
+           <button onclick="uncheckAll(this)"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             ☐ Uncheck All
+           </button>
+           <button onclick="copyTasks(this)"
+             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+             📋 Copy
+           </button>
+         </div>
+       </div>`;
 
+  card.innerHTML = photos + header + body;
   return card;
+}
+
+async function randomizeTasks(btn, roomName) {
+  const body     = btn.closest('.room-body');
+  const taskList = body.querySelector('.task-list');
+  const actionBtns = body.querySelector('.action-btns');
+
+  // Collect previously shown tasks to exclude
+  const prevTasks = [...taskList.querySelectorAll('.task-label')].map(l => l.textContent);
+
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+
+  try {
+    const res = await fetch('/randomize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: currentJobId, room_name: roomName, exclude: prevTasks }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    const tasks = data.tasks;
+    taskList.innerHTML = tasks.map(task => `
+      <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+          onclick="toggleTask(this, ${tasks.length})">
+        <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+        <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+      </li>
+    `).join('');
+
+    taskList.classList.remove('hidden');
+    actionBtns.classList.remove('hidden');
+    // Update checkAll total
+    actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
+  } catch (err) {
+    btn.textContent = 'Error — try again';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🎲 Randomize Tasks';
+  }
 }
 
 // ── Room interactions ────────────────────────────────────────────────────────

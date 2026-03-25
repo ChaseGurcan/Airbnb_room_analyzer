@@ -3,6 +3,7 @@ import re
 import json
 import sys
 import time
+import random
 import threading
 import webbrowser
 from io import BytesIO
@@ -680,6 +681,32 @@ def status(job_id):
     if job["status"] == "error":
         return jsonify({"status": "error", "error": job["error"]}), 500
     return jsonify({"status": "done", **job["result"]})
+
+
+@app.route("/randomize", methods=["POST"])
+def randomize():
+    body      = request.get_json(force=True)
+    job_id    = body.get("job_id", "")
+    room_name = body.get("room_name", "")
+    exclude   = set(body.get("exclude", []))
+
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "done":
+        return jsonify({"error": "Job not found or not complete"}), 404
+
+    rooms    = job["result"]["data"]["rooms"]
+    room     = next((r for r in rooms if r["name"] == room_name), None)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+
+    all_tasks = room.get("tasks", [])
+    available = [t for t in all_tasks if t not in exclude]
+    if len(available) < 7:
+        available = all_tasks  # reset if pool is nearly exhausted
+
+    count    = random.randint(7, 11)
+    selected = random.sample(available, min(count, len(available)))
+    return jsonify({"tasks": selected})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
