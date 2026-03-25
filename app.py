@@ -321,8 +321,14 @@ def verify_rooms(result, listing_details):
     }
 
 
+FLASH_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+]
+
 def _get_available_models(client):
-    """Return Gemini models that support generateContent, preferred first."""
+    """Return Gemini models with flash variants first, then fallback to others."""
     available = []
     try:
         for m in client.models.list():
@@ -333,8 +339,9 @@ def _get_available_models(client):
     except Exception as e:
         print(f"  Could not list models: {e}")
 
-    preferred = [m for m in available if any(k in m for k in ("flash", "pro")) and "embedding" not in m]
-    return preferred if preferred else available
+    flash = [m for m in FLASH_MODELS if any(m in a for a in available)]
+    others = [m for m in available if not any(f in m for f in FLASH_MODELS) and "embedding" not in m]
+    return flash + others if flash else others
 
 
 def _gemini_call(client, models_to_try, parts, max_tokens=4096):
@@ -482,7 +489,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
 
     results_map = {}
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls)}
+        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls[:22])}
         for future in as_completed(futures):
             idx, url, data = future.result()
             if data:
