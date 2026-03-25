@@ -4,3 +4,4 @@ requests>=2.31
 beautifulsoup4>=4.12
 Pillow>=10.0
 playwright>=1.40
+gunicorn>=21.0
