@@ -267,6 +267,7 @@ async function analyze() {
   setLoadingStep(1);
   loadingTimer = setTimeout(() => setLoadingStep(2), 4000);
   const timer2 = setTimeout(() => setLoadingStep(3), 12000);
+  const startTime = Date.now();
 
   try {
     // Start job
@@ -291,7 +292,8 @@ async function analyze() {
         clearTimeout(loadingTimer);
         clearTimeout(timer2);
         currentJobId = jobId;
-        renderResults(pollData);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        renderResults(pollData, elapsed);
         break;
       }
     }
@@ -306,7 +308,7 @@ async function analyze() {
 
 // ── Render ───────────────────────────────────────────────────────────────────
 
-function renderResults(data) {
+function renderResults(data, elapsed) {
   const { image_count, data: analysis } = data;
   const { property_description, rooms, verification } = analysis;
 
@@ -330,7 +332,7 @@ function renderResults(data) {
     property_description || 'Vacation Rental';
 
   document.getElementById('summaryMeta').textContent =
-    `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''}`;
+    `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''} · ${elapsed}s`;
 
   // Wipe previous results completely before rendering new ones
   const list = document.getElementById('roomList');
@@ -351,7 +353,6 @@ function buildRoomCard(room, idx) {
   card.className = 'room-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden';
   card.style.animationDelay = `${idx * 60}ms`;
 
-  const isBedroom = room.name.toLowerCase().includes('bedroom');
   const totalTasks = room.tasks.length;
 
   const photos = room.photo_urls && room.photo_urls.length
@@ -371,67 +372,37 @@ function buildRoomCard(room, idx) {
       <span class="text-2xl">${room.emoji || '🏠'}</span>
       <div class="flex-1 min-w-0">
         <span class="font-semibold text-gray-800">${escHtml(room.name)}</span>
-        ${isBedroom
-          ? `<span class="ml-2 text-xs text-gray-400">${totalTasks} tasks available</span>`
-          : `<span class="ml-2 text-xs text-gray-400">${totalTasks} tasks</span>`}
+        <span class="ml-2 text-xs text-gray-400">${totalTasks} tasks available</span>
       </div>
-      <div class="flex items-center gap-3">
-        ${isBedroom ? '' : `<span class="progress-label text-xs text-gray-400">0 / ${totalTasks}</span>`}
-        <svg class="chevron w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </div>
+      <svg class="chevron w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
     </button>`;
 
-  const body = isBedroom
-    ? `<div class="room-body border-t border-gray-50">
-         <div class="px-5 py-4">
-           <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
-             class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
-             🎲 Randomize Tasks
-           </button>
-         </div>
-         <ul class="task-list px-5 space-y-1 hidden"></ul>
-         <div class="px-5 pb-4 action-btns hidden flex gap-2">
-           <button onclick="checkAll(this, 0)"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             ✓ Check All
-           </button>
-           <button onclick="uncheckAll(this)"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             ☐ Uncheck All
-           </button>
-           <button onclick="copyTasks(this)"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             📋 Copy
-           </button>
-         </div>
-       </div>`
-    : `<div class="room-body border-t border-gray-50">
-         <ul class="px-5 py-3 space-y-1">
-           ${room.tasks.map(task => `
-             <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-                 onclick="toggleTask(this, ${totalTasks})">
-               <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
-               <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
-             </li>
-           `).join('')}
-         </ul>
-         <div class="px-5 pb-4 flex gap-2">
-           <button onclick="checkAll(this, ${totalTasks})"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             ✓ Check All
-           </button>
-           <button onclick="uncheckAll(this)"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             ☐ Uncheck All
-           </button>
-           <button onclick="copyTasks(this)"
-             class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
-             📋 Copy
-           </button>
-         </div>
-       </div>`;
+  const body = `
+    <div class="room-body border-t border-gray-50">
+      <div class="px-5 py-4">
+        <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
+          class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
+          🎲 Randomize Tasks
+        </button>
+      </div>
+      <ul class="task-list px-5 space-y-1 hidden"></ul>
+      <div class="px-5 pb-4 action-btns hidden flex gap-2">
+        <button onclick="checkAll(this, 0)"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          ✓ Check All
+        </button>
+        <button onclick="uncheckAll(this)"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          ☐ Uncheck All
+        </button>
+        <button onclick="copyTasks(this)"
+          class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1 hover:bg-gray-50">
+          📋 Copy
+        </button>
+      </div>
+    </div>`;
 
   card.innerHTML = photos + header + body;
   return card;
