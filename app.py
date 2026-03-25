@@ -379,8 +379,19 @@ def _strip_tasks_field(text):
         text,
         flags=re.DOTALL,
     )
-    # Pass 2: remove truncated "tasks": [ ... <EOF> — everything from the key to end
-    text = re.sub(r',?\s*"tasks"\s*:\s*\[.*', '', text, flags=re.DOTALL)
+    # Pass 2: remove truncated "tasks": [ ... <EOF> and properly close open brackets
+    match = re.search(r',?\s*"tasks"\s*:\s*\[', text, flags=re.DOTALL)
+    if match:
+        before = text[:match.start()]
+        stack = []
+        for ch in before:
+            if ch == '{':
+                stack.append('}')
+            elif ch == '[':
+                stack.append(']')
+            elif ch in ']}' and stack and stack[-1] == ch:
+                stack.pop()
+        text = before + ''.join(reversed(stack))
     return text
 
 
