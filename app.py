@@ -487,6 +487,11 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         return p
 
     # ── Download and resize images in parallel ────────────────────────────────
+    large_set = len(image_urls) > 25
+    img_size  = (384, 384) if large_set else (512, 512)
+    img_quality = 70 if large_set else 85
+    print(f"  Downloading {len(image_urls)} image(s) at {img_size[0]}px q={img_quality}…")
+
     def _download_image(args):
         idx, url = args
         try:
@@ -495,9 +500,9 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 img = Image.open(BytesIO(r.content))
                 if img.mode in ("RGBA", "P", "CMYK"):
                     img = img.convert("RGB")
-                img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                img.thumbnail(img_size, Image.Resampling.LANCZOS)
                 buf = BytesIO()
-                img.save(buf, format="JPEG", quality=85)
+                img.save(buf, format="JPEG", quality=img_quality)
                 return idx, url, buf.getvalue()
         except Exception as e:
             print(f"  [warn] could not load image {url}: {e}")
