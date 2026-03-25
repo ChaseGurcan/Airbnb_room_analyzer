@@ -198,6 +198,7 @@
         <div>
           <h2 class="text-xl font-bold text-gray-800" id="propDescription"></h2>
           <p class="text-sm text-gray-400" id="summaryMeta"></p>
+          <p class="text-xs mt-0.5" style="color: #a78bfa;" id="elapsedTime"></p>
         </div>
         <div class="flex gap-2">
           <button onclick="expandAll()" class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
@@ -344,7 +345,8 @@ function renderResults(data, elapsed) {
     property_description || 'Vacation Rental';
 
   document.getElementById('summaryMeta').textContent =
-    `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''} · ${elapsed}s`;
+    `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''}`;
+  document.getElementById('elapsedTime').textContent = `Completed in ${elapsed}s`;
 
   // Wipe previous results completely before rendering new ones
   const list = document.getElementById('roomList');
