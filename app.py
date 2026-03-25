@@ -283,7 +283,8 @@ For each room generate EXACTLY {task_count} unique checklist items using ONLY th
 2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do — nothing creative or unusual.
 Do NOT include: activities, hobbies, games, cooking recipes, creative tasks, or anything that isn't either a mess/cleanup item or a simple on/off/open/close action. Items should be 3-8 words, specific to the room. NO candle wax items.
 
-Also identify 5-10 unique characteristics or amenities this property has that go beyond what a normal house would have (e.g. hot tub, game room, home theater, rooftop deck, sauna, wine cellar, pool table, etc.). Only include things clearly visible or strongly implied by the photos. Do not list ordinary items like bedrooms, bathrooms, or a kitchen.
+STEP 4 - Identify unique features:
+List 3-8 special amenities or characteristics visible in the photos that go beyond a standard house (e.g. "Hot tub on deck", "Pool table in game room", "Home theater with projector", "Rooftop terrace", "Sauna", "Indoor slide"). If the property appears to be a standard home with no special features, still list at least 1-2 notable things you observed (e.g. "Open floor plan", "Floor-to-ceiling windows"). Always populate unique_features — never leave it empty.
 
 Return ONLY a valid JSON object - no markdown - using this schema:
 
