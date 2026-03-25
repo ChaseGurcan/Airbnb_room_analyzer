@@ -113,23 +113,19 @@ def get_airbnb_images(url):
         listing_details = {"bedrooms": None, "bathrooms": None, "summary": ""}
 
         try:
-            # Warm up: visit homepage first - listener NOT active yet
-            page.goto("https://www.airbnb.com", wait_until="domcontentloaded", timeout=20_000)
-            page.wait_for_timeout(500)
-
-            # Start collecting image URLs ONLY from the actual listing page
+            # Start collecting image URLs
             page.on("response", lambda r: seen_urls.add(r.url) if ("muscache.com" in r.url and "/pictures/" in r.url) else None)
 
-            # Navigate to the listing
+            # Navigate directly to the listing
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            page.wait_for_timeout(1500)
-
-            # Scroll gradually to trigger lazy-load
-            for pct in [0.25, 0.5, 0.75, 1.0]:
-                page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {pct})")
-                page.wait_for_timeout(400)
-            page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(1000)
+
+            # Scroll to trigger lazy-load
+            for pct in [0.5, 1.0]:
+                page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {pct})")
+                page.wait_for_timeout(300)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(500)
 
             # Try clicking into the photo gallery
             for selector in [
@@ -219,16 +215,20 @@ Each photo is labeled [Photo 0], [Photo 1], [Photo 2], etc. immediately before t
 
 STEP 1 - Scan EVERY photo individually before grouping anything:
 Go through each labeled photo one by one. For each photo write down (mentally) what room it shows.
-Do NOT skip any photo. Every photo label must be assigned to exactly one room or marked as outdoor/exterior.
+Do NOT skip any photo. Every photo label must be assigned to exactly one interior room or skipped if outdoor/exterior.
 
-Room identification rules:
+EXCLUDE entirely — do not create a room entry for:
+- Any outdoor or exterior space: patios, decks, balconies, pools, gardens, yards, driveways, building exteriors, views from windows.
+- Any photo that is primarily outdoors even if a doorway or window is visible.
+
+Room identification rules (interior only):
 - Bedroom: bed, pillows, headboard, nightstands, wardrobe/dresser. Number multiple bedrooms (Bedroom 1, Bedroom 2, etc.).
 - Bathroom: toilet, bathtub, shower, vanity with mirror, tiled wet-room floor, towel bars. Even if only partially visible. Half Bathroom = toilet + sink only.
 - Classify any photo containing bathroom fixtures as a Bathroom - never as a Bedroom.
 - Kitchen: countertops, stove/oven, refrigerator, kitchen sink, cabinets.
 - Living Room: sofa/couch, coffee table, TV, armchairs.
 - Dining Room: dining table with chairs.
-- Other standard names: Foyer, Hallway, Laundry Room, Home Office.
+- Other standard interior names: Foyer, Hallway, Laundry Room, Home Office.
 
 STEP 2 - Group photos by room:
 Create one entry per distinct room. Assign ALL photo labels for that room to photo_indices.
@@ -263,14 +263,14 @@ STOP after the closing } - do not add anything else."""
 
 TASKS_PROMPT_TEMPLATE = """You are generating activity checklists for each room in an Airbnb vacation rental.
 
-For each room listed below, generate EXACTLY 50 unique items. Mix two types:
+For each room listed below, generate EXACTLY {task_count} unique items. Mix two types:
 1. General everyday actions a guest might do in that room (e.g. "turn on the TV", "fill the Brita filter", "put food in the dog bowl", "turn on a lamp", "brew a pot of coffee")
 2. Mess or damage scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop")
 
 Aim for roughly 60% everyday actions and 40% mess/damage scenarios. Both types should be specific to that room.
 
 Rules:
-- 50 items minimum per room
+- {task_count} items minimum per room
 - Each item is a short phrase, 3-8 words
 - Only realistic scenarios for that specific room type
 - NO candle wax items
@@ -434,7 +434,7 @@ def _try_parse(text):
     )
 
 
-def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None):
+def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None, task_count=25):
     client = genai.Client(api_key=api_key)
     models = _get_available_models(client)
     if not models:
@@ -581,7 +581,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
 
     # ── CALL 2: Text-only - generate 50 mess/damage items per room ────────────
     room_list = "\n".join(f"- {r['name']}" for r in rooms)
-    tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list)
+    tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
 
     text_parts = [genai_types.Part(text=tasks_prompt)]
     print(f"  [Call 2/2] Generating tasks for {len(rooms)} room(s)…")
@@ -606,7 +606,7 @@ import uuid
 _jobs = {}  # job_id -> {"status": "pending"|"done"|"error", "result": ..., "error": ...}
 
 
-def _run_job(job_id, airbnb_url, api_key):
+def _run_job(job_id, airbnb_url, api_key, task_count=25):
     try:
         print(f"\n[{job_id}] [1/4] Fetching listing: {airbnb_url}")
         image_urls, listing_details = get_airbnb_images(airbnb_url)
@@ -620,7 +620,7 @@ def _run_job(job_id, airbnb_url, api_key):
         print(f"[{job_id}] [2/4] Found {len(image_urls)} image(s). Listing details: {listing_details}")
 
         print(f"[{job_id}] [3/4] Sending to Gemini…")
-        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details)
+        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details, task_count=task_count)
         print(f"[{job_id}]   Identified {len(result.get('rooms', []))} room(s).")
 
         verification = verify_rooms(result, listing_details)
@@ -629,7 +629,7 @@ def _run_job(job_id, airbnb_url, api_key):
         if not verification["passed"] and verification["issues"]:
             hint = "The actual listing has: " + "; ".join(verification["issues"]) + "."
             print(f"[{job_id}]   Retrying with correction hint: {hint}")
-            result = analyze_with_gemini(image_urls, api_key, correction_hint=hint, listing_details=listing_details)
+            result = analyze_with_gemini(image_urls, api_key, correction_hint=hint, listing_details=listing_details, task_count=task_count)
             verification = verify_rooms(result, listing_details)
             verification["retried"] = True
             print(f"[{job_id}]   Post-retry verification: {verification}")
@@ -672,9 +672,10 @@ def analyze():
     if not api_key:
         return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
 
+    task_count = max(10, min(100, int(body.get("task_count", 25))))
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending"}
-    threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key, task_count), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 

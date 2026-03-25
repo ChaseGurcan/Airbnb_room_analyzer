@@ -140,6 +140,10 @@
           placeholder="https://www.airbnb.com/rooms/12345678"
           class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
         />
+        <input id="taskCountInput" type="number" min="10" max="100" value="25"
+          class="w-24 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-center"
+          title="Number of tasks to generate per room"
+        />
         <button id="analyzeBtn" onclick="analyze()"
           class="brand-btn text-white text-sm font-semibold px-6 py-2.5 rounded-xl whitespace-nowrap">
           🔍 Analyze Rooms
@@ -255,6 +259,7 @@ function setLoadingStep(step) {
 
 async function analyze() {
   const url = document.getElementById('urlInput').value.trim();
+  const taskCount = parseInt(document.getElementById('taskCountInput').value) || 25;
 
   if (!url) { showError('Please paste an Airbnb listing URL.'); return; }
 
@@ -274,7 +279,7 @@ async function analyze() {
     const startRes = await fetch('/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, task_count: taskCount }),
     });
     const startData = await startRes.json();
     if (!startRes.ok || startData.error) throw new Error(startData.error || 'Failed to start job');
