@@ -490,10 +490,9 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         return p
 
     # ── Download and resize images in parallel ────────────────────────────────
-    large_set = len(image_urls) > 25
-    img_size  = (384, 384) if large_set else (512, 512)
-    img_quality = 70 if large_set else 85
-    print(f"  Downloading {len(image_urls)} image(s) at {img_size[0]}px q={img_quality}…")
+    img_size    = (384, 384)
+    img_quality = 75
+    print(f"  Downloading {len(image_urls)} image(s) at 384px…")
 
     def _download_image(args):
         idx, url = args
