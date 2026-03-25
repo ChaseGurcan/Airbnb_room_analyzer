@@ -602,6 +602,7 @@ _jobs = {}  # job_id -> {"status": "pending"|"done"|"error", "result": ..., "err
 
 
 def _run_job(job_id, airbnb_url, api_key, task_count=25):
+    _start = time.time()
     try:
         print(f"\n[{job_id}] [1/4] Fetching listing: {airbnb_url}")
         image_urls, listing_details = get_airbnb_images(airbnb_url)
@@ -631,6 +632,8 @@ def _run_job(job_id, airbnb_url, api_key, task_count=25):
 
         result["verification"] = verification
         result["task_count"] = task_count
+        elapsed = round(time.time() - _start, 1)
+        print(f"[{job_id}] ✓ Done in {elapsed}s")
         _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_urls), "data": result}}
 
     except Exception as exc:
