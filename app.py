@@ -283,14 +283,10 @@ For each room generate EXACTLY {task_count} unique checklist items using ONLY th
 2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do — nothing creative or unusual.
 Do NOT include: activities, hobbies, games, cooking recipes, creative tasks, or anything that isn't either a mess/cleanup item or a simple on/off/open/close action. Items should be 3-8 words, specific to the room. NO candle wax items.
 
-STEP 4 - Identify unique features:
-List 3-8 special amenities or characteristics visible in the photos that go beyond a standard house (e.g. "Hot tub on deck", "Pool table in game room", "Home theater with projector", "Rooftop terrace", "Sauna", "Indoor slide"). If the property appears to be a standard home with no special features, still list at least 1-2 notable things you observed (e.g. "Open floor plan", "Floor-to-ceiling windows"). Always populate unique_features — never leave it empty.
-
 Return ONLY a valid JSON object - no markdown - using this schema:
 
 {{
   "property_description": "one-line description",
-  "unique_features": ["feature 1", "feature 2"],
   "rooms": [
     {{
       "name": "Room Name",
@@ -597,8 +593,29 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 seen_idx.add(idx)
         room["photo_urls"] = photo_urls
 
+    # ── Quick text-only call for unique features ──────────────────────────────
+    room_names = ", ".join(r["name"] for r in rooms)
+    prop_desc  = vision_result.get("property_description", "")
+    features_prompt = (
+        f'An Airbnb listing described as: "{prop_desc}". '
+        f'It contains these rooms: {room_names}. '
+        f'List 3-8 special amenities or standout features visible in the listing that go beyond a standard house. '
+        f'Examples: "Hot tub on deck", "Pool table", "Home theater", "Rooftop terrace", "Sauna", "Floor-to-ceiling windows". '
+        f'Return ONLY a JSON array of strings, e.g. ["Feature 1", "Feature 2"]. No other text.'
+    )
+    unique_features = []
+    try:
+        raw_f = _strip_fences(_gemini_call(client, models, [genai_types.Part(text=features_prompt)], max_tokens=512))
+        unique_features = json.loads(raw_f)
+        if not isinstance(unique_features, list):
+            unique_features = []
+        print(f"  Unique features: {unique_features}")
+    except Exception as e:
+        print(f"  [warn] Could not get unique features: {e}")
+
     return {
-        "property_description": vision_result.get("property_description", ""),
+        "property_description": prop_desc,
+        "unique_features": unique_features,
         "rooms": rooms,
     }
 
