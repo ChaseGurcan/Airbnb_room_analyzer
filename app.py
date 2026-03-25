@@ -635,6 +635,7 @@ def _run_job(job_id, airbnb_url, api_key, task_count=25):
             print(f"[{job_id}]   Post-retry verification: {verification}")
 
         result["verification"] = verification
+        result["task_count"] = task_count
         _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_urls), "data": result}}
 
     except Exception as exc:
@@ -707,13 +708,20 @@ def randomize():
     if not room:
         return jsonify({"error": "Room not found"}), 404
 
-    all_tasks = room.get("tasks", [])
-    available = [t for t in all_tasks if t not in exclude]
-    if len(available) < 7:
+    all_tasks  = room.get("tasks", [])
+    task_count = job["result"]["data"].get("task_count", len(all_tasks))
+    available  = [t for t in all_tasks if t not in exclude]
+    if len(available) < task_count:
         available = all_tasks  # reset if pool is nearly exhausted
 
-    count    = random.randint(7, 11)
-    selected = random.sample(available, min(count, len(available)))
+    if task_count < 11:
+        # Show all generated tasks as-is
+        selected = random.sample(available, min(task_count, len(available)))
+    else:
+        # Pick a random number between 7-11 from the larger pool
+        count    = random.randint(7, 11)
+        selected = random.sample(available, min(count, len(available)))
+
     return jsonify({"tasks": selected})
 
 
