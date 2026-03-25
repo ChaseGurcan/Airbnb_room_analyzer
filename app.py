@@ -278,10 +278,10 @@ Count your bedrooms. Count your bathrooms. These MUST match the listing details 
 If the counts are off, re-examine the photos and correct your groupings before outputting.
 
 After identifying rooms, also generate a task checklist for each room.
-For each room generate EXACTLY {task_count} unique checklist items. Mix:
-1. General everyday actions a guest might do in that room (e.g. "turn on the TV", "brew a pot of coffee")
-2. Mess or damage scenarios a host would address after checkout (e.g. "wet towel on the floor", "grease on stovetop")
-Aim for 80% mess/damage scenarios and 20% random activities that can be done in that room. Items should be 3-8 words, specific to the room. NO candle wax items.
+For each room generate EXACTLY {task_count} unique checklist items using ONLY these two types:
+1. Mess or cleanup scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop", "toothpaste in sink", "sheets tangled and stained"). These should make up the vast majority of items.
+2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do — nothing creative or unusual.
+Do NOT include: activities, hobbies, games, cooking recipes, creative tasks, or anything that isn't either a mess/cleanup item or a simple on/off/open/close action. Items should be 3-8 words, specific to the room. NO candle wax items.
 
 Return ONLY a valid JSON object - no markdown - using this schema:
 
