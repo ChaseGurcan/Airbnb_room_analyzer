@@ -486,7 +486,6 @@ function escHtml(str) {
 // ── Enter key shortcut ───────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadKey();
   document.getElementById('urlInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') analyze();
   });
