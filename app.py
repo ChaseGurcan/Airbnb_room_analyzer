@@ -75,9 +75,71 @@ def _parse_images_from_html(html):
     return [u for u in images if "/pictures/" in u]
 
 
+_SCRAPE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.airbnb.com/",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "same-origin",
+}
+
+
+def _extract_listing_details(text):
+    """Parse bedroom/bathroom counts and summary from raw page text."""
+    details = {"bedrooms": None, "bathrooms": None, "summary": ""}
+    bed = re.search(r'(\d+)\s+bedroom', text, re.IGNORECASE)
+    if bed:
+        details["bedrooms"] = int(bed.group(1))
+    elif re.search(r'\bstudio\b', text, re.IGNORECASE):
+        details["bedrooms"] = 0
+    bath = re.search(r'([\d.]+)\s+bath', text, re.IGNORECASE)
+    if bath:
+        details["bathrooms"] = float(bath.group(1))
+    summary = re.search(r'(\d+\s+guest[^·\n]*(?:·[^·\n]+){1,5})', text, re.IGNORECASE)
+    if summary:
+        details["summary"] = summary.group(1).strip()
+    return details
+
+
+def _try_fetch_direct(url):
+    """Attempt to fetch listing HTML via plain HTTP. Returns (html, listing_details) or None."""
+    try:
+        r = requests.get(url, headers=_SCRAPE_HEADERS, timeout=15)
+        if r.status_code == 200 and "__NEXT_DATA__" in r.text:
+            print("  Fast path: fetched HTML directly (no browser needed).")
+            soup = BeautifulSoup(r.text, "html.parser")
+            body_text = soup.get_text(" ")
+            return r.text, _extract_listing_details(body_text)
+    except Exception as e:
+        print(f"  Direct fetch failed: {e}")
+    return None, None
+
+
 def get_airbnb_images(url):
-    """Return a deduplicated list of listing image URLs using a real browser."""
-    print("  Launching browser to load Airbnb listing…")
+    """Return a deduplicated list of listing image URLs. Tries direct HTTP first, falls back to browser."""
+    html, listing_details = _try_fetch_direct(url)
+
+    if html:
+        images = set(_parse_images_from_html(html))
+        SKIP = ["airbnb-platform-assets", "AirbnbPlatformAssets",
+                "Favicons", "favicon", "static/packages", "UserProfile",
+                "search-bar", "category-icons", "/user/User/", "/User/original/"]
+        listing_photos = [
+            u for u in images
+            if not any(skip in u for skip in SKIP) and re.search(r'/pictures/', u)
+        ]
+        if listing_photos:
+            print(f"  Direct fetch found {len(listing_photos)} image(s).")
+            return listing_photos, listing_details
+
+    print("  Falling back to browser scrape…")
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -108,7 +170,6 @@ def get_airbnb_images(url):
         )
         page = ctx.new_page()
 
-        # Initialise before try so they always exist even on timeout
         seen_urls = set()
         listing_details = {"bedrooms": None, "bathrooms": None, "summary": ""}
 
@@ -144,28 +205,7 @@ def get_airbnb_images(url):
                     pass
 
             # ── Extract listing details from page text ──────────────────────
-            body_text = page.inner_text("body")
-
-            # Bedroom count
-            bed = re.search(r'(\d+)\s+bedroom', body_text, re.IGNORECASE)
-            if bed:
-                listing_details["bedrooms"] = int(bed.group(1))
-            elif re.search(r'\bstudio\b', body_text, re.IGNORECASE):
-                listing_details["bedrooms"] = 0
-
-            # Bathroom count
-            bath = re.search(r'([\d.]+)\s+bath', body_text, re.IGNORECASE)
-            if bath:
-                listing_details["bathrooms"] = float(bath.group(1))
-
-            # Pull the short summary line: "X guests · X bedrooms · X beds · X baths"
-            summary_match = re.search(
-                r'(\d+\s+guest[^·\n]*(?:·[^·\n]+){1,5})',
-                body_text, re.IGNORECASE
-            )
-            if summary_match:
-                listing_details["summary"] = summary_match.group(1).strip()
-
+            listing_details = _extract_listing_details(page.inner_text("body"))
             print(f"  Listing details: {listing_details}")
 
         except PWTimeout:
@@ -193,19 +233,16 @@ def get_airbnb_images(url):
         if "/pictures/" in u:
             images.add(u.split("?")[0])
 
-    # Remove Airbnb UI/platform assets - keep only actual listing photos
     SKIP = ["airbnb-platform-assets", "AirbnbPlatformAssets",
             "Favicons", "favicon", "static/packages", "UserProfile",
             "search-bar", "category-icons", "/user/User/", "/User/original/"]
     listing_photos = [
         u for u in images
-        if not any(skip in u for skip in SKIP)
-        and re.search(r'/pictures/', u)   # any pictures/ path
+        if not any(skip in u for skip in SKIP) and re.search(r'/pictures/', u)
     ]
 
-    result = listing_photos
-    print(f"  Found {len(result)} listing image(s).")
-    return result, listing_details
+    print(f"  Browser fallback found {len(listing_photos)} listing image(s).")
+    return listing_photos, listing_details
 
 
 # ─── Gemini Analysis ──────────────────────────────────────────────────────────
