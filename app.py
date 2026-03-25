@@ -484,7 +484,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             p.append(label)
             p.append(img)
         print(f"  [Vision] Sending {len(loaded_urls)} images to Gemini…")
-        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=8192))
+        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=32768))
         print(f"  Vision response (first 500 chars):\n{raw[:500]}")
         # Remove any stray 'tasks' field Gemini may have added - it truncates the JSON
         raw = _strip_tasks_field(raw)
