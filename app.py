@@ -592,6 +592,48 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     }
 
 
+# ─── Job Store ────────────────────────────────────────────────────────────────
+
+import uuid
+_jobs = {}  # job_id -> {"status": "pending"|"done"|"error", "result": ..., "error": ...}
+
+
+def _run_job(job_id, airbnb_url, api_key):
+    try:
+        print(f"\n[{job_id}] [1/4] Fetching listing: {airbnb_url}")
+        image_urls, listing_details = get_airbnb_images(airbnb_url)
+        if not image_urls:
+            _jobs[job_id] = {"status": "error", "error": (
+                "No images were found in that listing. "
+                "Airbnb may have blocked the request. "
+                "Try opening the URL in your browser first, then paste it here."
+            )}
+            return
+        print(f"[{job_id}] [2/4] Found {len(image_urls)} image(s). Listing details: {listing_details}")
+
+        print(f"[{job_id}] [3/4] Sending to Gemini…")
+        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details)
+        print(f"[{job_id}]   Identified {len(result.get('rooms', []))} room(s).")
+
+        verification = verify_rooms(result, listing_details)
+        print(f"[{job_id}] [4/4] Verification: {verification}")
+
+        if not verification["passed"] and verification["issues"]:
+            hint = "The actual listing has: " + "; ".join(verification["issues"]) + "."
+            print(f"[{job_id}]   Retrying with correction hint: {hint}")
+            result = analyze_with_gemini(image_urls, api_key, correction_hint=hint, listing_details=listing_details)
+            verification = verify_rooms(result, listing_details)
+            verification["retried"] = True
+            print(f"[{job_id}]   Post-retry verification: {verification}")
+
+        result["verification"] = verification
+        _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_urls), "data": result}}
+
+    except Exception as exc:
+        print(f"[{job_id}] [error] {exc}")
+        _jobs[job_id] = {"status": "error", "error": str(exc)}
+
+
 # ─── Flask Routes ─────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -622,41 +664,22 @@ def analyze():
     if not api_key:
         return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
 
-    try:
-        print(f"\n[1/4] Fetching listing: {airbnb_url}")
-        image_urls, listing_details = get_airbnb_images(airbnb_url)
-        if not image_urls:
-            return jsonify({
-                "error": (
-                    "No images were found in that listing. "
-                    "Airbnb may have blocked the request. "
-                    "Try opening the URL in your browser first, then paste it here."
-                )
-            }), 400
-        print(f"[2/4] Found {len(image_urls)} image(s). Listing details: {listing_details}")
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "pending"}
+    threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key), daemon=True).start()
+    return jsonify({"job_id": job_id})
 
-        print(f"[3/4] Sending to Gemini…")
-        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details)
-        print(f"  Identified {len(result.get('rooms', []))} room(s).")
 
-        # Verification pass
-        verification = verify_rooms(result, listing_details)
-        print(f"[4/4] Verification: {verification}")
-
-        if not verification["passed"] and verification["issues"]:
-            hint = "The actual listing has: " + "; ".join(verification["issues"]) + "."
-            print(f"  Retrying with correction hint: {hint}")
-            result = analyze_with_gemini(image_urls, api_key, correction_hint=hint, listing_details=listing_details)
-            verification = verify_rooms(result, listing_details)
-            verification["retried"] = True
-            print(f"  Post-retry verification: {verification}")
-
-        result["verification"] = verification
-        return jsonify({"success": True, "image_count": len(image_urls), "data": result})
-
-    except Exception as exc:
-        print(f"[error] {exc}")
-        return jsonify({"error": str(exc)}), 500
+@app.route("/status/<job_id>")
+def status(job_id):
+    job = _jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] == "pending":
+        return jsonify({"status": "pending"})
+    if job["status"] == "error":
+        return jsonify({"status": "error", "error": job["error"]}), 500
+    return jsonify({"status": "done", **job["result"]})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

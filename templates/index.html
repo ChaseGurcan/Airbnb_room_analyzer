@@ -262,28 +262,35 @@ async function analyze() {
   document.getElementById('analyzeBtn').disabled = true;
 
   setLoadingStep(1);
-
-  // Fake progress steps for UX while we wait
   loadingTimer = setTimeout(() => setLoadingStep(2), 4000);
   const timer2 = setTimeout(() => setLoadingStep(3), 12000);
 
   try {
-    const res = await fetch('/analyze', {
+    // Start job
+    const startRes = await fetch('/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
+    const startData = await startRes.json();
+    if (!startRes.ok || startData.error) throw new Error(startData.error || 'Failed to start job');
 
-    clearTimeout(loadingTimer);
-    clearTimeout(timer2);
+    const jobId = startData.job_id;
 
-    const data = await res.json();
+    // Poll until done
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000));
+      const pollRes = await fetch(`/status/${jobId}`);
+      const pollData = await pollRes.json();
 
-    if (!res.ok || data.error) {
-      throw new Error(data.error || 'Unknown server error');
+      if (pollData.status === 'error') throw new Error(pollData.error || 'Analysis failed');
+      if (pollData.status === 'done') {
+        clearTimeout(loadingTimer);
+        clearTimeout(timer2);
+        renderResults(pollData);
+        break;
+      }
     }
-
-    renderResults(data);
 
   } catch (err) {
     showError(err.message);
