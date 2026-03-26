@@ -448,11 +448,6 @@ def _try_parse(text):
     candidate = re.search(r'\{[\s\S]*', text)
     if candidate:
         partial = candidate.group()
-        # If truncated mid-string, trim back to the last complete string entry
-        if partial.count('"') % 2 != 0:
-            last_comma = partial.rfind('",')
-            if last_comma >= 0:
-                partial = partial[:last_comma + 1]
         opens  = partial.count('{') - partial.count('}')
         aopens = partial.count('[') - partial.count(']')
         partial += ']' * max(aopens, 0) + '}' * max(opens, 0)
