@@ -662,13 +662,30 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         room["photo_urls"] = photo_urls
 
     # ── Call 2: Text-only tasks generation ───────────────────────────────────
-    room_list = "\n".join(f"- {r['name']}" for r in rooms)
-    tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
+    # Estimate output tokens: ~20 tokens per task item in JSON.
+    # Flash models cap at ~8192 output tokens, so split into per-room calls
+    # when the total expected output would exceed that limit.
+    estimated_tokens = len(rooms) * task_count * 20
+    tasks_max_tokens = max(1024, task_count * 25)
+    tasks_by_name = {}
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
-    raw2, _ = _gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384)
-    raw2 = _strip_fences(raw2)
-    tasks_result = _try_parse(raw2)
-    tasks_by_name = {r["name"]: r.get("tasks", []) for r in tasks_result.get("rooms", [])}
+    if estimated_tokens > 6000:
+        # Per-room calls to avoid truncation on large task counts
+        for room in rooms:
+            single_list = f"- {room['name']}"
+            single_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=single_list, task_count=task_count)
+            raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=tasks_max_tokens)
+            raw2 = _strip_fences(raw2)
+            room_result = _try_parse(raw2)
+            for r in room_result.get("rooms", []):
+                tasks_by_name[r["name"]] = r.get("tasks", [])
+    else:
+        room_list = "\n".join(f"- {r['name']}" for r in rooms)
+        tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
+        raw2, _ = _gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384)
+        raw2 = _strip_fences(raw2)
+        tasks_result = _try_parse(raw2)
+        tasks_by_name = {r["name"]: r.get("tasks", []) for r in tasks_result.get("rooms", [])}
     for room in rooms:
         room["tasks"] = tasks_by_name.get(room["name"], [])
 
