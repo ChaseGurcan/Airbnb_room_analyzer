@@ -669,20 +669,16 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     tasks_by_name = {}
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
     if task_count > 40 or estimated_tokens > 4000:
-        # Per-room calls in parallel to avoid truncation on large task counts
-        def _fetch_room_tasks(room):
+        # Per-room calls (sequential) to avoid truncation on large task counts
+        for room in rooms:
             single_prompt = TASKS_PROMPT_TEMPLATE.format(
                 room_list=f"- {room['name']}", task_count=task_count
             )
             raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=8192)
             raw2 = _strip_fences(raw2)
             room_result = _try_parse(raw2)
-            return {r["name"]: r.get("tasks", []) for r in room_result.get("rooms", [])}
-
-        with ThreadPoolExecutor(max_workers=len(rooms)) as ex:
-            futures = [ex.submit(_fetch_room_tasks, room) for room in rooms]
-            for future in as_completed(futures):
-                tasks_by_name.update(future.result())
+            for r in room_result.get("rooms", []):
+                tasks_by_name[r["name"]] = r.get("tasks", [])
     else:
         room_list = "\n".join(f"- {r['name']}" for r in rooms)
         tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
