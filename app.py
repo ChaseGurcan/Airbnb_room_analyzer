@@ -277,12 +277,6 @@ STEP 3 - Verify counts before outputting:
 Count your bedrooms. Count your bathrooms. These MUST match the listing details provided.
 If the counts are off, re-examine the photos and correct your groupings before outputting.
 
-After identifying rooms, also generate a task checklist for each room.
-For each room generate EXACTLY {task_count} unique checklist items using ONLY these two types:
-1. Mess or cleanup scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop", "toothpaste in sink", "sheets tangled and stained"). These should make up the vast majority of items.
-2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do — nothing creative or unusual.
-Do NOT include: activities, hobbies, games, cooking recipes, creative tasks, or anything that isn't either a mess/cleanup item or a simple on/off/open/close action. Items should be 3-8 words, specific to the room. NO candle wax items.
-
 Return ONLY a valid JSON object - no markdown - using this schema:
 
 {{
@@ -295,13 +289,26 @@ Return ONLY a valid JSON object - no markdown - using this schema:
       "photo_indices": [
         {{"index": 0, "confidence": 95}},
         {{"index": 2, "confidence": 80}}
-      ],
-      "tasks": ["item 1", "item 2"]
+      ]
     }}
   ]
 }}
 photo_index and all photo_indices index values MUST be label numbers you actually saw.
 STOP after the closing }} - do not add anything else."""
+
+
+TASKS_PROMPT_TEMPLATE = """You are generating a checklist for each room in an Airbnb vacation rental.
+
+For each room listed below, generate EXACTLY {task_count} unique items using ONLY these two types:
+1. Mess or cleanup scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop", "toothpaste in sink", "sheets tangled and stained"). These should make up the vast majority of items.
+2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do.
+Do NOT include: activities, hobbies, games, cooking recipes, or anything creative. Items should be 3-8 words. NO candle wax items.
+
+Rooms:
+{room_list}
+
+Return ONLY a valid JSON object - no markdown - using this schema:
+{{"rooms": [{{"name": "Room Name", "tasks": ["item 1", "item 2"]}}]}}"""
 
 
 def _count_room_type(rooms, keyword):
@@ -469,7 +476,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     summary = (listing_details or {}).get("summary", "")
 
     def _build_prompt(hint=""):
-        p = VISION_PROMPT.format(task_count=task_count)
+        p = VISION_PROMPT
         detail_lines = []
         if summary:
             detail_lines.append(f'Listing summary: "{summary}"')
@@ -537,9 +544,10 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         for label, img in image_parts:
             p.append(label)
             p.append(img)
-        print(f"  [1/1] Sending {len(loaded_urls)} images to Gemini (combined call)…")
-        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=32768))
-        print(f"  Response (first 500 chars):\n{raw[:500]}")
+        print(f"  [1/2] Sending {len(loaded_urls)} images to Gemini…")
+        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=8192))
+        raw = _strip_tasks_field(raw)
+        print(f"  Vision response (first 300 chars):\n{raw[:300]}")
         return _try_parse(raw)
 
     # ── Vision call with up to 2 internal retries if counts mismatch ─────────
@@ -592,6 +600,16 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 photo_urls.append(loaded_urls[idx])
                 seen_idx.add(idx)
         room["photo_urls"] = photo_urls
+
+    # ── Call 2: Text-only tasks generation ───────────────────────────────────
+    room_list = "\n".join(f"- {r['name']}" for r in rooms)
+    tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
+    print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
+    raw2 = _strip_fences(_gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384))
+    tasks_result = _try_parse(raw2)
+    tasks_by_name = {r["name"]: r.get("tasks", []) for r in tasks_result.get("rooms", [])}
+    for room in rooms:
+        room["tasks"] = tasks_by_name.get(room["name"], [])
 
     # ── Quick text-only call for unique features ──────────────────────────────
     room_names = ", ".join(r["name"] for r in rooms)
