@@ -315,16 +315,19 @@ Return ONLY a valid JSON object - no markdown - using this schema:
 {{"rooms": [{{"name": "Room Name", "tasks": ["item 1", "item 2"]}}]}}"""
 
 
-TASKS_PROMPT_TEMPLATE = """You are generating a list of multi-step tasks for an Airbnb vacation rental.
+TASKS_PROMPT_TEMPLATE = """You are generating a list of everyday household tasks for each room in a home.
 
 For each room listed below, generate EXACTLY {task_count} unique tasks. Each task must:
+- Be a normal, routine household chore or errand that anyone would do in that type of room
 - Require 3-6 sequential physical steps to complete
-- Be a realistic task a host, cleaner, or guest would perform in that specific room
-- Have steps that flow in logical order (walk to location, pick up item, perform action, put back, etc.)
+- Have steps that flow in a natural, logical order
 
 Good examples:
-- "Fill the water filter pitcher": ["Walk to the kitchen", "Open the refrigerator", "Remove the pitcher", "Carry it to the sink", "Fill with cold water", "Return pitcher to fridge"]
+- "Change the bed sheets": ["Pull off the pillowcases and set aside", "Strip the fitted sheet and flat sheet from the mattress", "Put the dirty sheets in the laundry hamper", "Stretch the clean fitted sheet over each corner of the mattress", "Lay the flat sheet evenly on top", "Slide fresh pillowcases onto each pillow"]
 - "Replace the toilet paper roll": ["Open the cabinet under the sink", "Take out a new roll", "Remove the empty cardboard tube from the holder", "Slide the new roll onto the holder", "Discard the cardboard tube"]
+- "Unload the dishwasher": ["Open the dishwasher door", "Pull out the bottom rack", "Put away dishes and bowls in the cabinet", "Pull out the top rack", "Put away glasses and mugs", "Remove and put away the utensil basket"]
+
+Only include tasks that are genuinely applicable to the specific room. Do not include Airbnb-specific or guest-specific tasks.
 
 Rooms:
 {room_list}
