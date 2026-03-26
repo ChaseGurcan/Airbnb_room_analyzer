@@ -448,6 +448,11 @@ def _try_parse(text):
     candidate = re.search(r'\{[\s\S]*', text)
     if candidate:
         partial = candidate.group()
+        # If truncated mid-string, trim back to the last complete string entry
+        if partial.count('"') % 2 != 0:
+            last_comma = partial.rfind('",')
+            if last_comma >= 0:
+                partial = partial[:last_comma + 1]
         opens  = partial.count('{') - partial.count('}')
         aopens = partial.count('[') - partial.count(']')
         partial += ']' * max(aopens, 0) + '}' * max(opens, 0)
@@ -669,7 +674,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     tasks_max_tokens = max(1024, task_count * 25)
     tasks_by_name = {}
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
-    if estimated_tokens > 6000:
+    if task_count > 40 or estimated_tokens > 4000:
         # Per-room calls to avoid truncation on large task counts
         for room in rooms:
             single_list = f"- {room['name']}"
