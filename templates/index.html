@@ -130,29 +130,79 @@
 
   <main class="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-    <!-- URL Card -->
+    <!-- Input Card -->
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-      <div class="flex items-center gap-3 mb-4">
-        <h2 class="font-semibold text-gray-700">Airbnb Listing URL</h2>
-      </div>
-      <div class="flex flex-col sm:flex-row gap-3">
-        <input id="urlInput" type="url"
-          placeholder="https://www.airbnb.com/rooms/12345678"
-          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
-        />
-        <input id="taskCountInput" type="number" min="10" max="100" value="25"
-          class="w-24 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-center"
-          title="Number of tasks to generate per room"
-        />
-        <button id="analyzeBtn" onclick="analyze()"
-          class="brand-btn text-white text-sm font-semibold px-6 py-2.5 rounded-xl whitespace-nowrap">
-          🔍 Analyze Rooms
+      <!-- Tab switcher -->
+      <div class="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+        <button id="tabUrl" onclick="switchTab('url')"
+          class="tab-btn text-sm font-semibold px-4 py-1.5 rounded-lg transition-all bg-white shadow text-gray-800">
+          🔗 Airbnb URL
+        </button>
+        <button id="tabUpload" onclick="switchTab('upload')"
+          class="tab-btn text-sm font-semibold px-4 py-1.5 rounded-lg transition-all text-gray-500">
+          📁 Upload Photos
         </button>
       </div>
-      <p class="text-xs text-gray-400 mt-2">
-        Paste the full URL from your browser's address bar.
-        The app will download the listing photos and identify every room.
-      </p>
+
+      <!-- URL tab -->
+      <div id="panelUrl">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="urlInput" type="url"
+            placeholder="https://www.airbnb.com/rooms/12345678"
+            class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
+          />
+          <input id="taskCountInput" type="number" min="1" max="100" value="25"
+            class="w-24 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-center"
+            title="Number of tasks to generate per room"
+          />
+          <button id="analyzeBtn" onclick="analyze()"
+            class="brand-btn text-white text-sm font-semibold px-6 py-2.5 rounded-xl whitespace-nowrap">
+            🔍 Analyze Rooms
+          </button>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">
+          Paste the full URL from your browser's address bar.
+          The app will download the listing photos and identify every room.
+        </p>
+      </div>
+
+      <!-- Upload tab -->
+      <div id="panelUpload" class="hidden">
+        <div id="dropZone"
+          class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-red-300 hover:bg-red-50 transition-all"
+          onclick="document.getElementById('fileInput').click()"
+          ondragover="event.preventDefault(); this.classList.add('border-red-400','bg-red-50')"
+          ondragleave="this.classList.remove('border-red-400','bg-red-50')"
+          ondrop="handleDrop(event)">
+          <div class="text-3xl mb-2">🏠</div>
+          <p class="text-sm font-medium text-gray-600">Drop photos here or click to browse</p>
+          <p class="text-xs text-gray-400 mt-1">Select individual files or an entire folder of listing photos</p>
+          <input id="fileInput" type="file" accept="image/*" multiple class="hidden"
+            onchange="handleFileSelect(this.files)" />
+        </div>
+
+        <!-- Folder option -->
+        <div class="flex items-center gap-2 mt-3">
+          <button onclick="document.getElementById('folderInput').click()"
+            class="text-xs text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
+            📂 Select Folder
+          </button>
+          <input id="folderInput" type="file" accept="image/*" multiple webkitdirectory class="hidden"
+            onchange="handleFileSelect(this.files)" />
+          <span id="fileCount" class="text-xs text-gray-400"></span>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 mt-3">
+          <input id="taskCountUpload" type="number" min="1" max="100" value="25"
+            class="w-24 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-center"
+            title="Number of tasks to generate per room"
+          />
+          <button id="uploadBtn" onclick="analyzeUpload()"
+            class="brand-btn text-white text-sm font-semibold px-6 py-2.5 rounded-xl whitespace-nowrap">
+            🔍 Analyze Rooms
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Loading State -->
@@ -249,6 +299,39 @@
 let currentJobId = null;
 let roomTasksMap = {};   // roomName -> full task array
 let taskCountSetting = 25;
+let selectedFiles = [];  // FileList/array for upload mode
+
+// ── Tab switcher ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  const isUrl = tab === 'url';
+  document.getElementById('panelUrl').classList.toggle('hidden', !isUrl);
+  document.getElementById('panelUpload').classList.toggle('hidden', isUrl);
+  document.getElementById('tabUrl').className =
+    'tab-btn text-sm font-semibold px-4 py-1.5 rounded-lg transition-all ' +
+    (isUrl ? 'bg-white shadow text-gray-800' : 'text-gray-500');
+  document.getElementById('tabUpload').className =
+    'tab-btn text-sm font-semibold px-4 py-1.5 rounded-lg transition-all ' +
+    (!isUrl ? 'bg-white shadow text-gray-800' : 'text-gray-500');
+}
+
+// ── File handling ─────────────────────────────────────────────────────────────
+function handleFileSelect(files) {
+  const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+  selectedFiles = imageFiles;
+  const countEl = document.getElementById('fileCount');
+  if (imageFiles.length === 0) {
+    countEl.textContent = 'No image files found.';
+  } else {
+    countEl.textContent = `${imageFiles.length} image${imageFiles.length !== 1 ? 's' : ''} selected`;
+  }
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  document.getElementById('dropZone').classList.remove('border-red-400', 'bg-red-50');
+  const files = event.dataTransfer.files;
+  handleFileSelect(files);
+}
 
 // ── Analyze ─────────────────────────────────────────────────────────────────
 
@@ -325,6 +408,58 @@ async function analyze() {
   } finally {
     document.getElementById('loadingCard').classList.add('hidden');
     document.getElementById('analyzeBtn').disabled = false;
+  }
+}
+
+async function analyzeUpload() {
+  if (!selectedFiles.length) { showError('Please select at least one image file.'); return; }
+
+  const taskCount = parseInt(document.getElementById('taskCountUpload').value) || 25;
+
+  hideError();
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('loadingCard').classList.remove('hidden');
+  document.getElementById('uploadBtn').disabled = true;
+
+  setLoadingStep(1);
+  const t2 = setTimeout(() => setLoadingStep(2), 2000);
+  const t3 = setTimeout(() => setLoadingStep(3), 8000);
+  const startTime = Date.now();
+  document.getElementById('liveTimer').textContent = '0s';
+  const liveTimerInterval = setInterval(() => {
+    document.getElementById('liveTimer').textContent =
+      `${((Date.now() - startTime) / 1000).toFixed(0)}s`;
+  }, 1000);
+
+  try {
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('images', f));
+    fd.append('task_count', taskCount);
+
+    const startRes = await fetch('/analyze-upload', { method: 'POST', body: fd });
+    const startData = await startRes.json();
+    if (!startRes.ok || startData.error) throw new Error(startData.error || 'Failed to start job');
+
+    const jobId = startData.job_id;
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000));
+      const pollRes = await fetch(`/status/${jobId}`);
+      const pollData = await pollRes.json();
+      if (pollData.status === 'error') throw new Error(pollData.error || 'Analysis failed');
+      if (pollData.status === 'done') {
+        clearTimeout(t2); clearTimeout(t3); clearInterval(liveTimerInterval);
+        currentJobId = jobId;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        renderResults(pollData, elapsed);
+        break;
+      }
+    }
+  } catch (err) {
+    clearInterval(liveTimerInterval);
+    showError(err.message);
+  } finally {
+    document.getElementById('loadingCard').classList.add('hidden');
+    document.getElementById('uploadBtn').disabled = false;
   }
 }
 

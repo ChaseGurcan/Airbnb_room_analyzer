@@ -462,7 +462,7 @@ def _try_parse(text):
     )
 
 
-def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None, task_count=25):
+def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None, task_count=25, image_bytes_list=None):
     client = genai.Client(api_key=api_key)
     models = _get_available_models(client)
     if not models:
@@ -501,42 +501,63 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     # ── Download and resize images in parallel ────────────────────────────────
     img_size    = (384, 384)
     img_quality = 75
-    print(f"  Downloading {len(image_urls)} image(s) at 384px…")
 
-    def _download_image(args):
-        idx, url = args
-        try:
-            r = requests.get(url, headers=dl_headers, timeout=15)
-            if r.status_code == 200:
-                img = Image.open(BytesIO(r.content))
+    loaded_urls = []
+    image_parts = []
+
+    if image_bytes_list is not None:
+        # Upload mode: bytes already in memory, just resize
+        print(f"  Processing {len(image_bytes_list)} uploaded image(s) at 384px…")
+        for idx, raw_bytes in enumerate(image_bytes_list):
+            try:
+                img = Image.open(BytesIO(raw_bytes))
                 if img.mode in ("RGBA", "P", "CMYK"):
                     img = img.convert("RGB")
                 img.thumbnail(img_size, Image.Resampling.LANCZOS)
                 buf = BytesIO()
                 img.save(buf, format="JPEG", quality=img_quality)
-                return idx, url, buf.getvalue()
-        except Exception as e:
-            print(f"  [warn] could not load image {url}: {e}")
-        return idx, url, None
+                image_parts.append((
+                    genai_types.Part(text=f"[Photo {len(loaded_urls)}]"),
+                    genai_types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"),
+                ))
+                loaded_urls.append(f"upload_{idx}")
+            except Exception as e:
+                print(f"  [warn] could not process uploaded image {idx}: {e}")
+    else:
+        # URL mode: download from Airbnb
+        print(f"  Downloading {len(image_urls)} image(s) at 384px…")
 
-    results_map = {}
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls)}
-        for future in as_completed(futures):
-            idx, url, data = future.result()
-            if data:
-                results_map[idx] = (url, data)
+        def _download_image(args):
+            idx, url = args
+            try:
+                r = requests.get(url, headers=dl_headers, timeout=15)
+                if r.status_code == 200:
+                    img = Image.open(BytesIO(r.content))
+                    if img.mode in ("RGBA", "P", "CMYK"):
+                        img = img.convert("RGB")
+                    img.thumbnail(img_size, Image.Resampling.LANCZOS)
+                    buf = BytesIO()
+                    img.save(buf, format="JPEG", quality=img_quality)
+                    return idx, url, buf.getvalue()
+            except Exception as e:
+                print(f"  [warn] could not load image {url}: {e}")
+            return idx, url, None
 
-    loaded_urls = []
-    image_parts = []
-    for idx in sorted(results_map):
-        url, data = results_map[idx]
-        label_idx = len(loaded_urls)
-        image_parts.append((
-            genai_types.Part(text=f"[Photo {label_idx}]"),
-            genai_types.Part.from_bytes(data=data, mime_type="image/jpeg"),
-        ))
-        loaded_urls.append(url)
+        results_map = {}
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {ex.submit(_download_image, (i, url)): i for i, url in enumerate(image_urls)}
+            for future in as_completed(futures):
+                idx, url, data = future.result()
+                if data:
+                    results_map[idx] = (url, data)
+
+        for idx in sorted(results_map):
+            url, data = results_map[idx]
+            image_parts.append((
+                genai_types.Part(text=f"[Photo {len(loaded_urls)}]"),
+                genai_types.Part.from_bytes(data=data, mime_type="image/jpeg"),
+            ))
+            loaded_urls.append(url)
 
     if not loaded_urls:
         raise ValueError(
@@ -752,6 +773,52 @@ def analyze():
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending"}
     threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key, task_count), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25):
+    _start = time.time()
+    try:
+        print(f"\n[{job_id}] [upload] Processing {len(image_bytes_list)} uploaded image(s).")
+        result = analyze_with_gemini(
+            [], api_key,
+            task_count=task_count,
+            image_bytes_list=image_bytes_list,
+        )
+        print(f"[{job_id}]   Identified {len(result.get('rooms', []))} room(s).")
+        result["verification"] = {"passed": None, "issues": [], "expected_bedrooms": None, "expected_bathrooms": None}
+        result["task_count"] = task_count
+        elapsed = round(time.time() - _start, 1)
+        print(f"[{job_id}] ✓ Done in {elapsed}s")
+        _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_bytes_list), "data": result}}
+    except Exception as exc:
+        print(f"[{job_id}] [error] {exc}")
+        _jobs[job_id] = {"status": "error", "error": str(exc)}
+
+
+@app.route("/analyze-upload", methods=["POST"])
+def analyze_upload():
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
+
+    files = request.files.getlist("images")
+    if not files or all(f.filename == "" for f in files):
+        return jsonify({"error": "No images were uploaded."}), 400
+
+    task_count = max(1, min(100, int(request.form.get("task_count", 25))))
+
+    image_bytes_list = []
+    for f in files:
+        if f.filename:
+            image_bytes_list.append(f.read())
+
+    if not image_bytes_list:
+        return jsonify({"error": "No valid image files found in the upload."}), 400
+
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "pending"}
+    threading.Thread(target=_run_job_upload, args=(job_id, image_bytes_list, api_key, task_count), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 
