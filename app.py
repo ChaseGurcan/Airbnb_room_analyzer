@@ -938,6 +938,39 @@ def randomize():
         return jsonify({"task": task})
 
 
+@app.route("/order-tasks", methods=["POST"])
+def order_tasks():
+    body       = request.get_json(force=True)
+    room_name  = body.get("room_name", "room")
+    task_names = body.get("task_names", [])
+
+    if len(task_names) <= 1:
+        return jsonify({"ordered": task_names})
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    client  = genai.Client(api_key=api_key)
+    models  = _get_available_models(client)
+
+    prompt = (
+        f"You are helping organize tasks in a {room_name} to be completed efficiently.\n\n"
+        f"Put these tasks in the most logical order to minimize unnecessary movement "
+        f"and complete them all without backtracking:\n"
+        f"{json.dumps(task_names)}\n\n"
+        f"Return ONLY a JSON array of the exact task names in the optimal order. "
+        f"Example: [\"task c\", \"task a\", \"task b\"]"
+    )
+    try:
+        raw, _ = _gemini_call(client, models, [genai_types.Part(text=prompt)], max_tokens=256)
+        raw    = _strip_fences(raw)
+        ordered = json.loads(raw)
+        if isinstance(ordered, list) and set(ordered) == set(task_names):
+            return jsonify({"ordered": ordered})
+    except Exception as e:
+        print(f"  [warn] order-tasks failed: {e}")
+
+    return jsonify({"ordered": task_names})  # fallback: original order
+
+
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def _open_browser(port):

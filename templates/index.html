@@ -34,7 +34,7 @@
 
     /* room card accordion */
     .room-body { max-height: 0; overflow: hidden; transition: max-height .4s ease; }
-    .room-body.open { max-height: 2000px; }
+    .room-body.open { max-height: 6000px; }
     .chevron { transition: transform .3s; }
     .chevron.open { transform: rotate(180deg); }
 
@@ -614,7 +614,7 @@ function buildRoomCard(room, idx) {
       <div class="px-5 py-4">
         <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
           class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
-          ${currentMode === 'rearrange' ? '🎲 Randomize Tasks' : '🎲 Get Random Task'}
+          ${currentMode === 'rearrange' ? '🎲 Randomize Tasks' : '🎲 Get Tasks'}
         </button>
       </div>
       <ul class="task-list px-5 space-y-1 hidden"></ul>
@@ -671,29 +671,83 @@ function randomizeTasks(btn, roomName) {
     actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
 
   } else {
-    // Steps mode: pick one task and show its steps
+    // Steps mode: pick 3-5 tasks, order them via Gemini, show each with steps
     const shownNames = new Set([...taskList.querySelectorAll('[data-task-name]')].map(el => el.dataset.taskName));
     let available = allTasks.filter(t => !shownNames.has(t.name));
     if (available.length === 0) available = allTasks;
 
-    const task  = available[Math.floor(Math.random() * available.length)];
-    const steps = task.steps || [];
+    // Shuffle and pick 3-5
+    const pool = [...available];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const count    = Math.min(3 + Math.floor(Math.random() * 3), pool.length); // 3-5
+    const picked   = pool.slice(0, count);
+    const taskMap  = Object.fromEntries(picked.map(t => [t.name, t]));
 
-    taskList.innerHTML = `
-      <li class="px-2 pt-2 pb-1">
-        <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
-        <ul class="space-y-1">
-          ${steps.map((step, i) => `
-            <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-                onclick="toggleTask(this, ${steps.length})">
+    // Show loading state on button
+    btn.disabled = true;
+    btn.textContent = '⏳ Ordering…';
+    taskList.classList.add('hidden');
+
+    fetch('/order-tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_name: roomName, task_names: picked.map(t => t.name) }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      const orderedNames = data.ordered || picked.map(t => t.name);
+      const orderedTasks = orderedNames.map(n => taskMap[n]).filter(Boolean);
+      const totalSteps   = orderedTasks.reduce((s, t) => s + (t.steps || []).length, 0);
+
+      taskList.innerHTML = orderedTasks.map((task, ti) => {
+        const steps = task.steps || [];
+        return `
+          <li class="px-2 pt-3 ${ti > 0 ? 'border-t border-gray-100 mt-1' : ''}">
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">Task ${ti + 1}</div>
+            <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
+            <ul class="space-y-1 mb-2">
+              ${steps.map((step, i) => `
+                <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+                    onclick="toggleTask(this, ${totalSteps})">
+                  <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+                  <span class="task-label text-sm text-gray-700 select-none">${i + 1}. ${escHtml(step)}</span>
+                </li>
+              `).join('')}
+            </ul>
+          </li>
+        `;
+      }).join('');
+
+      actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${totalSteps})`);
+      taskList.classList.remove('hidden');
+      actionBtns.classList.remove('hidden');
+    })
+    .catch(() => {
+      // fallback: show tasks unordered
+      const totalSteps = picked.reduce((s, t) => s + (t.steps || []).length, 0);
+      taskList.innerHTML = picked.map((task, ti) => {
+        const steps = task.steps || [];
+        return `<li class="px-2 pt-3 ${ti > 0 ? 'border-t border-gray-100 mt-1' : ''}">
+          <div class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">Task ${ti + 1}</div>
+          <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
+          <ul class="space-y-1 mb-2">${steps.map((step, i) => `
+            <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer" onclick="toggleTask(this, ${totalSteps})">
               <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
               <span class="task-label text-sm text-gray-700 select-none">${i + 1}. ${escHtml(step)}</span>
-            </li>
-          `).join('')}
-        </ul>
-      </li>
-    `;
-    actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${steps.length})`);
+            </li>`).join('')}</ul></li>`;
+      }).join('');
+      actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${totalSteps})`);
+      taskList.classList.remove('hidden');
+      actionBtns.classList.remove('hidden');
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = '🎲 Get Tasks';
+    });
+    return; // async path handles classList changes above
   }
 
   taskList.classList.remove('hidden');
