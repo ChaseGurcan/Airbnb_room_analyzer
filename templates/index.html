@@ -561,7 +561,7 @@ function buildRoomCard(room, idx) {
       <span class="text-2xl">${room.emoji || '🏠'}</span>
       <div class="flex-1 min-w-0">
         <span class="font-semibold text-gray-800">${escHtml(room.name)}</span>
-        <span class="ml-2 text-xs text-gray-400">${totalTasks} tasks available</span>
+        <span class="ml-2 text-xs text-gray-400">${totalTasks} task${totalTasks !== 1 ? 's' : ''} in pool</span>
       </div>
       <svg class="chevron w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -573,7 +573,7 @@ function buildRoomCard(room, idx) {
       <div class="px-5 py-4">
         <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
           class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
-          🎲 Randomize Tasks
+          🎲 Get Random Task
         </button>
       </div>
       <ul class="task-list px-5 space-y-1 hidden"></ul>
@@ -602,36 +602,33 @@ function randomizeTasks(btn, roomName) {
   const taskList   = body.querySelector('.task-list');
   const actionBtns = body.querySelector('.action-btns');
 
-  const allTasks  = roomTasksMap[roomName] || [];
-  const prevTasks = new Set([...taskList.querySelectorAll('.task-label')].map(l => l.textContent));
+  const allTasks   = roomTasksMap[roomName] || [];
+  const shownNames = new Set([...taskList.querySelectorAll('[data-task-name]')].map(el => el.dataset.taskName));
 
-  let available = allTasks.filter(t => !prevTasks.has(t));
-  if (available.length < taskCountSetting) available = allTasks;  // reset pool if exhausted
+  let available = allTasks.filter(t => !shownNames.has(t.name));
+  if (available.length === 0) available = allTasks;  // reset pool if exhausted
 
-  // Pick count based on taskCountSetting
-  const count = taskCountSetting < 11
-    ? Math.min(taskCountSetting, available.length)
-    : Math.min(7 + Math.floor(Math.random() * 5), available.length);  // 7-11
+  const task = available[Math.floor(Math.random() * available.length)];
+  const steps = task.steps || [];
 
-  // Fisher-Yates shuffle then slice
-  const pool = [...available];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  const tasks = pool.slice(0, count);
-
-  taskList.innerHTML = tasks.map(task => `
-    <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-        onclick="toggleTask(this, ${tasks.length})">
-      <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
-      <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+  taskList.innerHTML = `
+    <li class="px-2 pt-2 pb-1">
+      <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
+      <ul class="space-y-1">
+        ${steps.map((step, i) => `
+          <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+              onclick="toggleTask(this, ${steps.length})">
+            <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+            <span class="task-label text-sm text-gray-700 select-none">${i + 1}. ${escHtml(step)}</span>
+          </li>
+        `).join('')}
+      </ul>
     </li>
-  `).join('');
+  `;
 
   taskList.classList.remove('hidden');
   actionBtns.classList.remove('hidden');
-  actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
+  actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${steps.length})`);
 }
 
 // ── Room interactions ────────────────────────────────────────────────────────
@@ -677,10 +674,12 @@ function uncheckAll(btn) {
 }
 
 function copyTasks(btn) {
-  const body  = btn.closest('.room-body');
-  const tasks = [...body.querySelectorAll('.task-label')].map(l => '• ' + l.textContent);
-  const header = body.previousElementSibling.querySelector('.font-semibold').textContent;
-  navigator.clipboard.writeText(header + '\n' + tasks.join('\n')).then(() => {
+  const body     = btn.closest('.room-body');
+  const roomName = body.previousElementSibling.querySelector('.font-semibold').textContent;
+  const taskName = body.querySelector('[data-task-name]')?.textContent || '';
+  const steps    = [...body.querySelectorAll('.task-label')].map(l => l.textContent);
+  const text     = `${roomName} — ${taskName}\n${steps.map(s => '  ' + s).join('\n')}`;
+  navigator.clipboard.writeText(text).then(() => {
     btn.textContent = '✅ Copied!';
     setTimeout(() => btn.textContent = '📋 Copy', 2000);
   });

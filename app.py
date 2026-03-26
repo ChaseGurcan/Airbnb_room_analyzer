@@ -301,18 +301,22 @@ photo_index and all photo_indices index values MUST be label numbers you actuall
 STOP after the closing }} - do not add anything else."""
 
 
-TASKS_PROMPT_TEMPLATE = """You are generating a checklist for each room in an Airbnb vacation rental.
+TASKS_PROMPT_TEMPLATE = """You are generating a list of multi-step tasks for an Airbnb vacation rental.
 
-For each room listed below, generate EXACTLY {task_count} unique items using ONLY these two types:
-1. Mess or cleanup scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop", "toothpaste in sink", "sheets tangled and stained"). These should make up the vast majority of items.
-2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do.
-Do NOT include: activities, hobbies, games, cooking recipes, or anything creative. Items should be 3-8 words. NO candle wax items.
+For each room listed below, generate EXACTLY {task_count} unique tasks. Each task must:
+- Require 3-6 sequential physical steps to complete
+- Be a realistic task a host, cleaner, or guest would perform in that specific room
+- Have steps that flow in logical order (walk to location, pick up item, perform action, put back, etc.)
+
+Good examples:
+- "Fill the water filter pitcher": ["Walk to the kitchen", "Open the refrigerator", "Remove the pitcher", "Carry it to the sink", "Fill with cold water", "Return pitcher to fridge"]
+- "Replace the toilet paper roll": ["Open the cabinet under the sink", "Take out a new roll", "Remove the empty cardboard tube from the holder", "Slide the new roll onto the holder", "Discard the cardboard tube"]
 
 Rooms:
 {room_list}
 
-Return ONLY a valid JSON object - no markdown - using this schema:
-{{"rooms": [{{"name": "Room Name", "tasks": ["item 1", "item 2"]}}]}}"""
+Return ONLY a valid JSON object - no markdown - using this exact schema:
+{{"rooms": [{{"name": "Room Name", "tasks": [{{"name": "short task name", "steps": ["step 1", "step 2", "step 3"]}}]}}]}}"""
 
 
 def _count_room_type(rooms, keyword):
@@ -662,10 +666,10 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         room["photo_urls"] = photo_urls
 
     # ── Call 2: Text-only tasks generation ───────────────────────────────────
-    # Estimate output tokens: ~20 tokens per task item in JSON.
+    # Estimate output tokens: ~60 tokens per multi-step task in JSON.
     # Flash models cap at ~8192 output tokens, so split into per-room calls
     # when the total expected output would exceed that limit.
-    estimated_tokens = len(rooms) * task_count * 20
+    estimated_tokens = len(rooms) * task_count * 60
     tasks_by_name = {}
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
     if task_count > 40 or estimated_tokens > 4000:
@@ -883,21 +887,13 @@ def randomize():
     if not room:
         return jsonify({"error": "Room not found"}), 404
 
-    all_tasks  = room.get("tasks", [])
-    task_count = job["result"]["data"].get("task_count", len(all_tasks))
-    available  = [t for t in all_tasks if t not in exclude]
-    if len(available) < task_count:
-        available = all_tasks  # reset if pool is nearly exhausted
+    all_tasks = room.get("tasks", [])
+    available = [t for t in all_tasks if t.get("name") not in exclude]
+    if not available:
+        available = all_tasks  # reset if pool exhausted
 
-    if task_count < 11:
-        # Show all generated tasks as-is
-        selected = random.sample(available, min(task_count, len(available)))
-    else:
-        # Pick a random number between 7-11 from the larger pool
-        count    = random.randint(7, 11)
-        selected = random.sample(available, min(count, len(available)))
-
-    return jsonify({"tasks": selected})
+    task = random.choice(available)
+    return jsonify({"task": task})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
