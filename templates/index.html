@@ -377,7 +377,8 @@ function renderResults(data, elapsed) {
 
   document.getElementById('summaryMeta').textContent =
     `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''}`;
-  document.getElementById('elapsedTime').textContent = `Completed in ${elapsed}s`;
+  const modelUsed = analysis.model_used || 'unknown';
+  document.getElementById('elapsedTime').textContent = `Completed in ${elapsed}s · ${modelUsed}`;
 
   // Wipe previous results completely before rendering new ones
   const list = document.getElementById('roomList');

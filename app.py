@@ -349,9 +349,10 @@ def verify_rooms(result, listing_details):
 
 
 FLASH_MODELS = [
+    "gemini-2.0-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
     "gemini-1.5-flash-8b",
+    "gemini-1.5-flash",
 ]
 
 def _get_available_models(client):
@@ -372,7 +373,7 @@ def _get_available_models(client):
 
 
 def _gemini_call(client, models_to_try, parts, max_tokens=4096):
-    """Call Gemini with the given parts, trying models in order. Returns raw text."""
+    """Call Gemini with the given parts, trying models in order. Returns (text, model_name)."""
     last_err = None
     for model_name in models_to_try:
         try:
@@ -385,7 +386,7 @@ def _gemini_call(client, models_to_try, parts, max_tokens=4096):
                 ),
             )
             print(f"  Using model: {model_name}")
-            return response.text.strip()
+            return response.text.strip(), model_name
         except Exception as e:
             print(f"  Model {model_name} failed: {e}")
             last_err = e
@@ -543,13 +544,16 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             "Airbnb may be restricting access - try a different listing URL."
         )
 
+    used_model = ["unknown"]
+
     def _run_vision(hint=""):
         p = [genai_types.Part(text=_build_prompt(hint))]
         for label, img in image_parts:
             p.append(label)
             p.append(img)
         print(f"  [1/2] Sending {len(loaded_urls)} images to Gemini…")
-        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=16384))
+        raw, used_model[0] = _gemini_call(client, models, p, max_tokens=16384)
+        raw = _strip_fences(raw)
         raw = _strip_tasks_field(raw)
         print(f"  Vision response (first 300 chars):\n{raw[:300]}")
         return _try_parse(raw)
@@ -609,7 +613,8 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     room_list = "\n".join(f"- {r['name']}" for r in rooms)
     tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
-    raw2 = _strip_fences(_gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384))
+    raw2, _ = _gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384)
+    raw2 = _strip_fences(raw2)
     tasks_result = _try_parse(raw2)
     tasks_by_name = {r["name"]: r.get("tasks", []) for r in tasks_result.get("rooms", [])}
     for room in rooms:
@@ -627,7 +632,8 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     )
     unique_features = []
     try:
-        raw_f = _strip_fences(_gemini_call(client, models, [genai_types.Part(text=features_prompt)], max_tokens=512))
+        raw_f, _ = _gemini_call(client, models, [genai_types.Part(text=features_prompt)], max_tokens=512)
+        raw_f = _strip_fences(raw_f)
         unique_features = json.loads(raw_f)
         if not isinstance(unique_features, list):
             unique_features = []
@@ -639,6 +645,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         "property_description": prop_desc,
         "unique_features": unique_features,
         "rooms": rooms,
+        "model_used": used_model[0],
     }
 
 
