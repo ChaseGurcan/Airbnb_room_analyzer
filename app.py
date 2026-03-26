@@ -544,6 +544,37 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             "Airbnb may be restricting access - try a different listing URL."
         )
 
+    # ── Pre-filter: remove exterior/outdoor images ────────────────────────────
+    if len(loaded_urls) > 4:
+        filter_parts = [genai_types.Part(text=(
+            "For each labeled photo below, decide if it shows an INTERIOR room "
+            "(bedroom, bathroom, kitchen, living room, dining room, hallway, laundry, office, etc.). "
+            "Exclude any photo that is primarily outdoors or exterior: "
+            "patios, decks, balconies, pools, gardens, yards, driveways, building fronts, aerial views. "
+            "Return ONLY a JSON array of the integer indices that are interior. "
+            "Example: [0, 1, 3, 5]"
+        ))]
+        for label, img in image_parts:
+            filter_parts.append(label)
+            filter_parts.append(img)
+        try:
+            raw_f, _ = _gemini_call(client, models, filter_parts, max_tokens=512)
+            raw_f = _strip_fences(raw_f)
+            interior_indices = json.loads(raw_f)
+            if isinstance(interior_indices, list) and len(interior_indices) >= 1:
+                interior_set = set(int(i) for i in interior_indices if isinstance(i, int))
+                removed = len(loaded_urls) - len(interior_set)
+                print(f"  Pre-filter: keeping {len(interior_set)}/{len(loaded_urls)} interior images (removed {removed} exterior).")
+                image_parts = [image_parts[i] for i in sorted(interior_set) if i < len(image_parts)]
+                loaded_urls = [loaded_urls[i] for i in sorted(interior_set) if i < len(loaded_urls)]
+                # Re-label after filtering so indices are contiguous
+                image_parts = [
+                    (genai_types.Part(text=f"[Photo {new_i}]"), img_part)
+                    for new_i, (_, img_part) in enumerate(image_parts)
+                ]
+        except Exception as e:
+            print(f"  [warn] Pre-filter failed, using all images: {e}")
+
     used_model = ["unknown"]
 
     def _run_vision(hint=""):
