@@ -545,7 +545,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             p.append(label)
             p.append(img)
         print(f"  [1/2] Sending {len(loaded_urls)} images to Gemini…")
-        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=8192))
+        raw = _strip_fences(_gemini_call(client, models, p, max_tokens=16384))
         raw = _strip_tasks_field(raw)
         print(f"  Vision response (first 300 chars):\n{raw[:300]}")
         return _try_parse(raw)
