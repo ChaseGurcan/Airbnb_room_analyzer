@@ -203,6 +203,29 @@
           </button>
         </div>
       </div>
+
+      <!-- Mode selector (shared between both tabs) -->
+      <div class="border-t border-gray-100 mt-5 pt-5">
+        <p class="text-sm font-medium text-gray-600 mb-3">What are you looking to do?</p>
+        <div class="flex gap-3">
+          <button id="modeRearrange" onclick="setMode('rearrange')"
+            class="mode-btn flex-1 flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 text-left hover:border-red-300 transition-all">
+            <span class="text-2xl">🔀</span>
+            <div>
+              <div class="text-sm font-semibold text-gray-700">Rearrange the room</div>
+              <div class="text-xs text-gray-400">Get a list of things to tackle</div>
+            </div>
+          </button>
+          <button id="modeTasks" onclick="setMode('tasks')"
+            class="mode-btn flex-1 flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-red-400 bg-red-50 text-left hover:border-red-400 transition-all">
+            <span class="text-2xl">✅</span>
+            <div>
+              <div class="text-sm font-semibold text-gray-700">Room-specific tasks</div>
+              <div class="text-xs text-gray-400">One task at a time with steps</div>
+            </div>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Loading State -->
@@ -299,7 +322,23 @@
 let currentJobId = null;
 let roomTasksMap = {};   // roomName -> full task array
 let taskCountSetting = 25;
+let currentMode = 'tasks';  // 'rearrange' | 'tasks'
 let selectedFiles = [];  // FileList/array for upload mode
+
+function setMode(mode) {
+  currentMode = mode;
+  const rearrangeBtn = document.getElementById('modeRearrange');
+  const tasksBtn     = document.getElementById('modeTasks');
+  const activeClass  = 'border-red-400 bg-red-50';
+  const inactiveClass = 'border-gray-200';
+  if (mode === 'rearrange') {
+    rearrangeBtn.className = rearrangeBtn.className.replace(inactiveClass, activeClass);
+    tasksBtn.className     = tasksBtn.className.replace(activeClass, inactiveClass).replace('bg-red-50', '');
+  } else {
+    tasksBtn.className     = tasksBtn.className.includes(activeClass) ? tasksBtn.className : tasksBtn.className.replace(inactiveClass, activeClass) + ' bg-red-50';
+    rearrangeBtn.className = rearrangeBtn.className.replace(activeClass, inactiveClass).replace('bg-red-50', '');
+  }
+}
 
 // ── Tab switcher ─────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -377,7 +416,7 @@ async function analyze() {
     const startRes = await fetch('/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, task_count: taskCount }),
+      body: JSON.stringify({ url, task_count: taskCount, mode: currentMode }),
     });
     const startData = await startRes.json();
     if (!startRes.ok || startData.error) throw new Error(startData.error || 'Failed to start job');
@@ -435,6 +474,7 @@ async function analyzeUpload() {
     const fd = new FormData();
     selectedFiles.forEach(f => fd.append('images', f));
     fd.append('task_count', taskCount);
+    fd.append('mode', currentMode);
 
     const startRes = await fetch('/analyze-upload', { method: 'POST', body: fd });
     const startData = await startRes.json();
@@ -486,9 +526,10 @@ function renderResults(data, elapsed) {
     featurePanel.classList.add('hidden');
   }
 
-  // Store full task lists and task count for offline randomization
+  // Store full task lists, task count, and mode for offline randomization
   roomTasksMap = {};
   taskCountSetting = analysis.task_count || parseInt(document.getElementById('taskCountInput').value) || 25;
+  currentMode = analysis.mode || 'tasks';
   rooms.forEach(room => { roomTasksMap[room.name] = room.tasks || []; });
 
   // Verification badge
@@ -573,7 +614,7 @@ function buildRoomCard(room, idx) {
       <div class="px-5 py-4">
         <button onclick="randomizeTasks(this, '${escHtml(room.name)}')"
           class="brand-btn text-white text-sm font-semibold px-5 py-2 rounded-xl">
-          🎲 Get Random Task
+          ${currentMode === 'rearrange' ? '🎲 Randomize Tasks' : '🎲 Get Random Task'}
         </button>
       </div>
       <ul class="task-list px-5 space-y-1 hidden"></ul>
@@ -601,34 +642,62 @@ function randomizeTasks(btn, roomName) {
   const body       = btn.closest('.room-body');
   const taskList   = body.querySelector('.task-list');
   const actionBtns = body.querySelector('.action-btns');
-
   const allTasks   = roomTasksMap[roomName] || [];
-  const shownNames = new Set([...taskList.querySelectorAll('[data-task-name]')].map(el => el.dataset.taskName));
 
-  let available = allTasks.filter(t => !shownNames.has(t.name));
-  if (available.length === 0) available = allTasks;  // reset pool if exhausted
+  if (currentMode === 'rearrange') {
+    // Flat mode: show a list of random task strings
+    const prevTasks = new Set([...taskList.querySelectorAll('.task-label')].map(l => l.textContent));
+    let available = allTasks.filter(t => !prevTasks.has(t));
+    if (available.length < taskCountSetting) available = allTasks;
 
-  const task = available[Math.floor(Math.random() * available.length)];
-  const steps = task.steps || [];
+    const count = taskCountSetting < 11
+      ? Math.min(taskCountSetting, available.length)
+      : Math.min(7 + Math.floor(Math.random() * 5), available.length);
 
-  taskList.innerHTML = `
-    <li class="px-2 pt-2 pb-1">
-      <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
-      <ul class="space-y-1">
-        ${steps.map((step, i) => `
-          <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
-              onclick="toggleTask(this, ${steps.length})">
-            <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
-            <span class="task-label text-sm text-gray-700 select-none">${i + 1}. ${escHtml(step)}</span>
-          </li>
-        `).join('')}
-      </ul>
-    </li>
-  `;
+    const pool = [...available];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const tasks = pool.slice(0, count);
+
+    taskList.innerHTML = tasks.map(task => `
+      <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+          onclick="toggleTask(this, ${tasks.length})">
+        <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+        <span class="task-label text-sm text-gray-700 select-none">${escHtml(task)}</span>
+      </li>
+    `).join('');
+    actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${tasks.length})`);
+
+  } else {
+    // Steps mode: pick one task and show its steps
+    const shownNames = new Set([...taskList.querySelectorAll('[data-task-name]')].map(el => el.dataset.taskName));
+    let available = allTasks.filter(t => !shownNames.has(t.name));
+    if (available.length === 0) available = allTasks;
+
+    const task  = available[Math.floor(Math.random() * available.length)];
+    const steps = task.steps || [];
+
+    taskList.innerHTML = `
+      <li class="px-2 pt-2 pb-1">
+        <div class="font-semibold text-gray-800 text-sm mb-2" data-task-name="${escHtml(task.name)}">${escHtml(task.name)}</div>
+        <ul class="space-y-1">
+          ${steps.map((step, i) => `
+            <li class="task-item flex items-start gap-3 px-2 py-1.5 cursor-pointer"
+                onclick="toggleTask(this, ${steps.length})">
+              <input type="checkbox" class="task-checkbox mt-0.5 accent-red-500 cursor-pointer shrink-0" />
+              <span class="task-label text-sm text-gray-700 select-none">${i + 1}. ${escHtml(step)}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </li>
+    `;
+    actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${steps.length})`);
+  }
 
   taskList.classList.remove('hidden');
   actionBtns.classList.remove('hidden');
-  actionBtns.querySelector('button').setAttribute('onclick', `checkAll(this, ${steps.length})`);
 }
 
 // ── Room interactions ────────────────────────────────────────────────────────
@@ -676,9 +745,15 @@ function uncheckAll(btn) {
 function copyTasks(btn) {
   const body     = btn.closest('.room-body');
   const roomName = body.previousElementSibling.querySelector('.font-semibold').textContent;
-  const taskName = body.querySelector('[data-task-name]')?.textContent || '';
-  const steps    = [...body.querySelectorAll('.task-label')].map(l => l.textContent);
-  const text     = `${roomName} — ${taskName}\n${steps.map(s => '  ' + s).join('\n')}`;
+  let text;
+  if (currentMode === 'rearrange') {
+    const tasks = [...body.querySelectorAll('.task-label')].map(l => '• ' + l.textContent);
+    text = roomName + '\n' + tasks.join('\n');
+  } else {
+    const taskName = body.querySelector('[data-task-name]')?.textContent || '';
+    const steps    = [...body.querySelectorAll('.task-label')].map(l => l.textContent);
+    text = `${roomName} — ${taskName}\n${steps.map(s => '  ' + s).join('\n')}`;
+  }
   navigator.clipboard.writeText(text).then(() => {
     btn.textContent = '✅ Copied!';
     setTimeout(() => btn.textContent = '📋 Copy', 2000);

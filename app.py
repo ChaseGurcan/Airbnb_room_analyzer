@@ -301,6 +301,20 @@ photo_index and all photo_indices index values MUST be label numbers you actuall
 STOP after the closing }} - do not add anything else."""
 
 
+TASKS_PROMPT_FLAT = """You are generating a checklist for each room in an Airbnb vacation rental.
+
+For each room listed below, generate EXACTLY {task_count} unique items using ONLY these two types:
+1. Mess or cleanup scenarios a host would need to address after checkout (e.g. "wet towel on the floor", "grease splattered on stovetop", "toothpaste in sink", "sheets tangled and stained"). These should make up the vast majority of items.
+2. Extremely common, simple actions a guest performs in that room (e.g. "turn on the light", "turn off the lamp", "turn on the TV", "close the blinds"). Only include actions that virtually every guest would do.
+Do NOT include: activities, hobbies, games, cooking recipes, or anything creative. Items should be 3-8 words. NO candle wax items.
+
+Rooms:
+{room_list}
+
+Return ONLY a valid JSON object - no markdown - using this schema:
+{{"rooms": [{{"name": "Room Name", "tasks": ["item 1", "item 2"]}}]}}"""
+
+
 TASKS_PROMPT_TEMPLATE = """You are generating a list of multi-step tasks for an Airbnb vacation rental.
 
 For each room listed below, generate EXACTLY {task_count} unique tasks. Each task must:
@@ -466,7 +480,7 @@ def _try_parse(text):
     )
 
 
-def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None, task_count=25, image_bytes_list=None):
+def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details=None, task_count=25, image_bytes_list=None, mode="tasks"):
     client = genai.Client(api_key=api_key)
     models = _get_available_models(client)
     if not models:
@@ -666,16 +680,26 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         room["photo_urls"] = photo_urls
 
     # ── Call 2: Text-only tasks generation ───────────────────────────────────
-    # Estimate output tokens: ~60 tokens per multi-step task in JSON.
+    # Pick prompt and per-token estimate based on mode.
+    # Flat tasks ~20 tokens each; multi-step tasks ~60 tokens each.
     # Flash models cap at ~8192 output tokens, so split into per-room calls
     # when the total expected output would exceed that limit.
-    estimated_tokens = len(rooms) * task_count * 60
+    if mode == "rearrange":
+        task_prompt_template = TASKS_PROMPT_FLAT
+        tokens_per_task = 20
+        split_threshold = 4000
+    else:
+        task_prompt_template = TASKS_PROMPT_TEMPLATE
+        tokens_per_task = 60
+        split_threshold = 3000
+
+    estimated_tokens = len(rooms) * task_count * tokens_per_task
     tasks_by_name = {}
-    print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
-    if task_count > 40 or estimated_tokens > 4000:
+    print(f"  [2/2] Generating {mode} tasks for {len(rooms)} room(s)…")
+    if task_count > 40 or estimated_tokens > split_threshold:
         # Per-room calls (sequential) to avoid truncation on large task counts
         for room in rooms:
-            single_prompt = TASKS_PROMPT_TEMPLATE.format(
+            single_prompt = task_prompt_template.format(
                 room_list=f"- {room['name']}", task_count=task_count
             )
             raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=8192)
@@ -685,7 +709,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
                 tasks_by_name[r["name"]] = r.get("tasks", [])
     else:
         room_list = "\n".join(f"- {r['name']}" for r in rooms)
-        tasks_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=room_list, task_count=task_count)
+        tasks_prompt = task_prompt_template.format(room_list=room_list, task_count=task_count)
         raw2, _ = _gemini_call(client, models, [genai_types.Part(text=tasks_prompt)], max_tokens=16384)
         raw2 = _strip_fences(raw2)
         tasks_result = _try_parse(raw2)
@@ -719,6 +743,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         "unique_features": unique_features,
         "rooms": rooms,
         "model_used": used_model[0],
+        "mode": mode,
     }
 
 
@@ -728,7 +753,7 @@ import uuid
 _jobs = {}  # job_id -> {"status": "pending"|"done"|"error", "result": ..., "error": ...}
 
 
-def _run_job(job_id, airbnb_url, api_key, task_count=25):
+def _run_job(job_id, airbnb_url, api_key, task_count=25, mode="tasks"):
     _start = time.time()
     try:
         print(f"\n[{job_id}] [1/4] Fetching listing: {airbnb_url}")
@@ -743,7 +768,7 @@ def _run_job(job_id, airbnb_url, api_key, task_count=25):
         print(f"[{job_id}] [2/4] Found {len(image_urls)} image(s). Listing details: {listing_details}")
 
         print(f"[{job_id}] [3/4] Sending to Gemini…")
-        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details, task_count=task_count)
+        result = analyze_with_gemini(image_urls, api_key, listing_details=listing_details, task_count=task_count, mode=mode)
         print(f"[{job_id}]   Identified {len(result.get('rooms', []))} room(s).")
 
         verification = verify_rooms(result, listing_details)
@@ -791,13 +816,16 @@ def analyze():
         return jsonify({"error": "GEMINI_API_KEY environment variable not set."}), 500
 
     task_count = max(1, min(100, int(body.get("task_count", 25))))
+    mode = body.get("mode", "tasks")
+    if mode not in ("rearrange", "tasks"):
+        mode = "tasks"
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending"}
-    threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key, task_count), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job_id, airbnb_url, api_key, task_count, mode), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 
-def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25):
+def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25, mode="tasks"):
     _start = time.time()
     try:
         print(f"\n[{job_id}] [upload] Processing {len(image_bytes_list)} uploaded image(s).")
@@ -807,6 +835,7 @@ def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25):
             [], api_key,
             task_count=task_count,
             image_bytes_list=image_bytes_list,
+            mode=mode,
         )
         print(f"[{job_id}]   Identified {len(result.get('rooms', []))} room(s).")
         result["verification"] = {"passed": None, "issues": [], "expected_bedrooms": None, "expected_bathrooms": None}
@@ -831,6 +860,9 @@ def analyze_upload():
         return jsonify({"error": "No images were uploaded."}), 400
 
     task_count = max(1, min(100, int(request.form.get("task_count", 25))))
+    mode = request.form.get("mode", "tasks")
+    if mode not in ("rearrange", "tasks"):
+        mode = "tasks"
 
     image_bytes_list = []
     for f in files:
@@ -842,7 +874,7 @@ def analyze_upload():
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending"}
-    threading.Thread(target=_run_job_upload, args=(job_id, image_bytes_list, api_key, task_count), daemon=True).start()
+    threading.Thread(target=_run_job_upload, args=(job_id, image_bytes_list, api_key, task_count, mode), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 
@@ -888,12 +920,22 @@ def randomize():
         return jsonify({"error": "Room not found"}), 404
 
     all_tasks = room.get("tasks", [])
-    available = [t for t in all_tasks if t.get("name") not in exclude]
-    if not available:
-        available = all_tasks  # reset if pool exhausted
+    mode = job["result"]["data"].get("mode", "tasks")
 
-    task = random.choice(available)
-    return jsonify({"task": task})
+    if mode == "rearrange":
+        available = [t for t in all_tasks if t not in exclude]
+        if not available:
+            available = all_tasks
+        task_count = job["result"]["data"].get("task_count", len(all_tasks))
+        count = task_count if task_count < 11 else random.randint(7, 11)
+        selected = random.sample(available, min(count, len(available)))
+        return jsonify({"tasks": selected})
+    else:
+        available = [t for t in all_tasks if t.get("name") not in exclude]
+        if not available:
+            available = all_tasks
+        task = random.choice(available)
+        return jsonify({"task": task})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
