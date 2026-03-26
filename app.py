@@ -666,7 +666,6 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     # Flash models cap at ~8192 output tokens, so split into per-room calls
     # when the total expected output would exceed that limit.
     estimated_tokens = len(rooms) * task_count * 20
-    tasks_max_tokens = max(1024, task_count * 25)
     tasks_by_name = {}
     print(f"  [2/2] Generating tasks for {len(rooms)} room(s)…")
     if task_count > 40 or estimated_tokens > 4000:
@@ -674,7 +673,7 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         for room in rooms:
             single_list = f"- {room['name']}"
             single_prompt = TASKS_PROMPT_TEMPLATE.format(room_list=single_list, task_count=task_count)
-            raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=tasks_max_tokens)
+            raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=8192)
             raw2 = _strip_fences(raw2)
             room_result = _try_parse(raw2)
             for r in room_result.get("rooms", []):
