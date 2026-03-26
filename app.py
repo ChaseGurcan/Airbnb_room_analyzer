@@ -213,6 +213,10 @@ def get_airbnb_images(url):
         except Exception as e:
             print(f"  [warn] could not extract listing details: {e}")
 
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=5000)
+        except Exception:
+            pass
         html = page.content()
 
         # Grab src attributes directly from rendered <img> tags
@@ -664,14 +668,6 @@ def _run_job(job_id, airbnb_url, api_key, task_count=25):
 
         verification = verify_rooms(result, listing_details)
         print(f"[{job_id}] [4/4] Verification: {verification}")
-
-        if not verification["passed"] and verification["issues"]:
-            hint = "The actual listing has: " + "; ".join(verification["issues"]) + "."
-            print(f"[{job_id}]   Retrying with correction hint: {hint}")
-            result = analyze_with_gemini(image_urls, api_key, correction_hint=hint, listing_details=listing_details, task_count=task_count)
-            verification = verify_rooms(result, listing_details)
-            verification["retried"] = True
-            print(f"[{job_id}]   Post-retry verification: {verification}")
 
         result["verification"] = verification
         result["task_count"] = task_count
