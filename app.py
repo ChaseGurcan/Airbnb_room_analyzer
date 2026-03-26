@@ -780,6 +780,8 @@ def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25):
     _start = time.time()
     try:
         print(f"\n[{job_id}] [upload] Processing {len(image_bytes_list)} uploaded image(s).")
+        # Store raw bytes so /image/<job_id>/<idx> can serve them back to the browser
+        _jobs[job_id]["images"] = {i: b for i, b in enumerate(image_bytes_list)}
         result = analyze_with_gemini(
             [], api_key,
             task_count=task_count,
@@ -790,7 +792,8 @@ def _run_job_upload(job_id, image_bytes_list, api_key, task_count=25):
         result["task_count"] = task_count
         elapsed = round(time.time() - _start, 1)
         print(f"[{job_id}] ✓ Done in {elapsed}s")
-        _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_bytes_list), "data": result}}
+        _jobs[job_id]["status"] = "done"
+        _jobs[job_id]["result"] = {"success": True, "image_count": len(image_bytes_list), "data": result}
     except Exception as exc:
         print(f"[{job_id}] [error] {exc}")
         _jobs[job_id] = {"status": "error", "error": str(exc)}
@@ -820,6 +823,19 @@ def analyze_upload():
     _jobs[job_id] = {"status": "pending"}
     threading.Thread(target=_run_job_upload, args=(job_id, image_bytes_list, api_key, task_count), daemon=True).start()
     return jsonify({"job_id": job_id})
+
+
+@app.route("/image/<job_id>/<int:idx>")
+def serve_upload_image(job_id, idx):
+    from flask import Response
+    job = _jobs.get(job_id)
+    if not job:
+        return ("Not found", 404)
+    images = job.get("images", {})
+    img_bytes = images.get(idx)
+    if img_bytes is None:
+        return ("Not found", 404)
+    return Response(img_bytes, mimetype="image/jpeg")
 
 
 @app.route("/status/<job_id>")

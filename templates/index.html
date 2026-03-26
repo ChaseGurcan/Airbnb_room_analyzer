@@ -529,6 +529,14 @@ function renderResults(data, elapsed) {
   document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function resolvePhotoUrl(url) {
+  if (url && url.startsWith('upload_')) {
+    const idx = url.slice(7);  // strip 'upload_'
+    return `/image/${currentJobId}/${idx}`;
+  }
+  return url;
+}
+
 function buildRoomCard(room, idx) {
   const card = document.createElement('div');
   card.className = 'room-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden';
@@ -539,7 +547,7 @@ function buildRoomCard(room, idx) {
   const photos = room.photo_urls && room.photo_urls.length
     ? `<div class="flex gap-2 px-5 pt-4 overflow-x-auto pb-1">
          ${room.photo_urls.map((url, i) => `
-           <img src="${url}" alt="${escHtml(room.name)} photo ${i+1}"
+           <img src="${resolvePhotoUrl(url)}" alt="${escHtml(room.name)} photo ${i+1}"
              class="h-32 w-32 rounded-xl object-cover shrink-0 shadow-sm" />
          `).join('')}
        </div>`
