@@ -160,6 +160,7 @@
       <div class="flex flex-col items-center gap-4">
         <div class="spinner"></div>
         <p id="loadingText" class="text-gray-600 font-medium text-sm">Fetching listing photos…</p>
+        <p id="liveTimer" class="text-sm font-bold" style="color: #a78bfa;">0s</p>
         <!-- progress dots -->
         <div class="flex items-center gap-3 mt-1">
           <div class="flex items-center gap-1.5">
@@ -282,6 +283,11 @@ async function analyze() {
   loadingTimer = setTimeout(() => setLoadingStep(2), 4000);
   const timer2 = setTimeout(() => setLoadingStep(3), 12000);
   const startTime = Date.now();
+  document.getElementById('liveTimer').textContent = '0s';
+  const liveTimerInterval = setInterval(() => {
+    const s = ((Date.now() - startTime) / 1000).toFixed(0);
+    document.getElementById('liveTimer').textContent = `${s}s`;
+  }, 1000);
 
   try {
     // Start job
@@ -305,6 +311,7 @@ async function analyze() {
       if (pollData.status === 'done') {
         clearTimeout(loadingTimer);
         clearTimeout(timer2);
+        clearInterval(liveTimerInterval);
         currentJobId = jobId;
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         renderResults(pollData, elapsed);
@@ -313,6 +320,7 @@ async function analyze() {
     }
 
   } catch (err) {
+    clearInterval(liveTimerInterval);
     showError(err.message);
   } finally {
     document.getElementById('loadingCard').classList.add('hidden');
