@@ -19,6 +19,60 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 app = Flask(__name__)
 
+# ─── Listing Cache ─────────────────────────────────────────────────────────────
+
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "listing_cache.json")
+
+def _listing_id(url):
+    m = re.search(r'/rooms/(\d+)', url)
+    return m.group(1) if m else None
+
+def _norm_url(url):
+    return url.split("?")[0].split("#")[0].rstrip("/")
+
+def _cache_key(listing_id_or_url, task_count, mode):
+    return f"{listing_id_or_url}|{task_count}|{mode}"
+
+def _load_cache():
+    try:
+        with open(CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_cache(cache):
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"  [warn] cache save failed: {e}")
+
+def _cache_lookup(url, task_count, mode):
+    cache = _load_cache()
+    lid = _listing_id(url)
+    if lid:
+        entry = cache.get(_cache_key(lid, task_count, mode))
+        if entry:
+            return entry
+    # Fallback: normalized URL
+    return cache.get(_cache_key(_norm_url(url), task_count, mode))
+
+def _cache_store(url, task_count, mode, job_result, address_hint):
+    cache = _load_cache()
+    entry = {
+        "address_hint": address_hint,
+        "url": _norm_url(url),
+        "task_count": task_count,
+        "mode": mode,
+        "cached_at": int(time.time()),
+        "job_result": job_result,
+    }
+    lid = _listing_id(url)
+    if lid:
+        cache[_cache_key(lid, task_count, mode)] = entry
+    cache[_cache_key(_norm_url(url), task_count, mode)] = entry
+    _save_cache(cache)
+
 
 # ─── Airbnb Scraper ───────────────────────────────────────────────────────────
 
@@ -116,7 +170,11 @@ def _try_fetch_direct(url):
             print("  Fast path: fetched HTML directly (no browser needed).")
             soup = BeautifulSoup(r.text, "html.parser")
             body_text = soup.get_text(" ")
-            return r.text, _extract_listing_details(body_text)
+            details = _extract_listing_details(body_text)
+            og = soup.find("meta", property="og:title")
+            if og and og.get("content"):
+                details["title"] = og["content"].split(" - Airbnb")[0].strip()
+            return r.text, details
     except Exception as e:
         print(f"  Direct fetch failed: {e}")
     return None, None
@@ -206,6 +264,12 @@ def get_airbnb_images(url):
 
             # ── Extract listing details from page text ──────────────────────
             listing_details = _extract_listing_details(page.inner_text("body"))
+            try:
+                page_title = page.title()
+                if page_title:
+                    listing_details["title"] = page_title.split(" - Airbnb")[0].strip()
+            except Exception:
+                pass
             print(f"  Listing details: {listing_details}")
 
         except PWTimeout:
@@ -794,6 +858,19 @@ _jobs = {}  # job_id -> {"status": "pending"|"done"|"error", "result": ..., "err
 def _run_job(job_id, airbnb_url, api_key, task_count=25, mode="tasks"):
     _start = time.time()
     try:
+        # ── Check cache ───────────────────────────────────────────────────────
+        cached = _cache_lookup(airbnb_url, task_count, mode)
+        if cached:
+            addr = cached.get("address_hint", airbnb_url)
+            print(f"[{job_id}] Cache hit: {addr}")
+            job_result = dict(cached["job_result"])
+            job_result["data"] = dict(job_result["data"])
+            job_result["data"]["from_cache"] = True
+            job_result["data"]["cached_at"] = cached.get("cached_at")
+            job_result["data"]["address_hint"] = addr
+            _jobs[job_id] = {"status": "done", "result": job_result}
+            return
+
         print(f"\n[{job_id}] [1/4] Fetching listing: {airbnb_url}")
         image_urls, listing_details = get_airbnb_images(airbnb_url)
         if not image_urls:
@@ -816,7 +893,16 @@ def _run_job(job_id, airbnb_url, api_key, task_count=25, mode="tasks"):
         result["task_count"] = task_count
         elapsed = round(time.time() - _start, 1)
         print(f"[{job_id}] ✓ Done in {elapsed}s")
-        _jobs[job_id] = {"status": "done", "result": {"success": True, "image_count": len(image_urls), "data": result}}
+
+        job_result = {"success": True, "image_count": len(image_urls), "data": result}
+        address_hint = (
+            (listing_details or {}).get("title")
+            or result.get("property_description")
+            or (listing_details or {}).get("summary")
+            or ""
+        )
+        _cache_store(airbnb_url, task_count, mode, job_result, address_hint)
+        _jobs[job_id] = {"status": "done", "result": job_result}
 
     except Exception as exc:
         print(f"[{job_id}] [error] {exc}")

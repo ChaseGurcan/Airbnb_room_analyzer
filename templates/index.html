@@ -556,7 +556,15 @@ function renderResults(data, elapsed) {
   document.getElementById('summaryMeta').textContent =
     `${rooms.length} room${rooms.length !== 1 ? 's' : ''} identified from ${image_count} photo${image_count !== 1 ? 's' : ''}`;
   const modelUsed = analysis.model_used || 'unknown';
-  document.getElementById('elapsedTime').textContent = `Completed in ${elapsed}s · ${modelUsed}`;
+  if (analysis.from_cache) {
+    const cachedDate = analysis.cached_at
+      ? new Date(analysis.cached_at * 1000).toLocaleDateString()
+      : 'previously';
+    const addrHint = analysis.address_hint ? ` · ${analysis.address_hint}` : '';
+    document.getElementById('elapsedTime').textContent = `⚡ Loaded from cache (analyzed ${cachedDate})${addrHint}`;
+  } else {
+    document.getElementById('elapsedTime').textContent = `Completed in ${elapsed}s · ${modelUsed}`;
+  }
 
   // Wipe previous results completely before rendering new ones
   const list = document.getElementById('roomList');
