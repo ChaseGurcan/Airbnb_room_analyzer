@@ -631,10 +631,10 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
         print(f"  Vision response (first 300 chars):\n{raw[:300]}")
         return _try_parse(raw)
 
-    # ── Vision call with up to 2 internal retries if counts mismatch ─────────
+    # ── Vision call with up to 3 internal retries if counts mismatch ─────────
     hint = correction_hint
     vision_result = _run_vision(hint)
-    for attempt in range(2):
+    for attempt in range(3):
         rooms = vision_result.get("rooms", [])
         found_beds  = sum(1 for r in rooms if "bedroom" in r.get("name", "").lower())
         found_baths = sum(1 for r in rooms if "bath" in r.get("name", "").lower())
@@ -645,7 +645,28 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
             issues.append(f"found {found_baths} bathroom(s) but listing has {int(baths)}")
         if not issues:
             break
-        hint = "Your previous response was wrong: " + "; ".join(issues) + ". Look at every photo again."
+
+        hint_parts = []
+        if beds is not None and found_beds < beds:
+            missing = beds - found_beds
+            hint_parts.append(
+                f"You identified {found_beds} bedroom(s) but this listing has EXACTLY {beds}. "
+                f"You are missing {missing} bedroom(s). "
+                f"ANY room containing a bed — including small rooms, lofts, or rooms you grouped with another — "
+                f"must be its own separate Bedroom entry. "
+                f"Scan every single photo for beds, headboards, pillows, or nightstands."
+            )
+        elif beds is not None and found_beds > beds:
+            hint_parts.append(
+                f"You identified {found_beds} bedroom(s) but this listing has only {beds}. "
+                f"Some rooms you labeled as bedrooms are likely other room types."
+            )
+        if baths is not None and found_baths != int(baths):
+            hint_parts.append(
+                f"You identified {found_baths} bathroom(s) but this listing has {int(baths)}. "
+                f"Check for any missed bathrooms or incorrectly labeled rooms."
+            )
+        hint = " ".join(hint_parts)
         print(f"  Vision mismatch (attempt {attempt+1}): {issues}. Retrying…")
         vision_result = _run_vision(hint)
 
@@ -689,27 +710,41 @@ def analyze_with_gemini(image_urls, api_key, correction_hint="", listing_details
     # when the total expected output would exceed that limit.
     if mode == "rearrange":
         task_prompt_template = TASKS_PROMPT_FLAT
-        tokens_per_task = 20
+        # Flat tasks are short strings; safe to batch up to 60 per call
+        max_per_call = 60
         split_threshold = 4000
+        tokens_per_task = 20
     else:
         task_prompt_template = TASKS_PROMPT_TEMPLATE
-        tokens_per_task = 60
+        # Multi-step tasks are verbose; cap at 20 per call to stay under 8192 tokens
+        max_per_call = 20
         split_threshold = 3000
+        tokens_per_task = 60
 
     estimated_tokens = len(rooms) * task_count * tokens_per_task
     tasks_by_name = {}
     print(f"  [2/2] Generating {mode} tasks for {len(rooms)} room(s)…")
+
+    def _generate_room_tasks(room_name):
+        """Generate all tasks for one room, sub-batching if task_count > max_per_call."""
+        accumulated = []
+        remaining = task_count
+        while remaining > 0:
+            batch = min(max_per_call, remaining)
+            prompt = task_prompt_template.format(room_list=f"- {room_name}", task_count=batch)
+            raw, _ = _gemini_call(client, models, [genai_types.Part(text=prompt)], max_tokens=8192)
+            raw = _strip_fences(raw)
+            result = _try_parse(raw)
+            for r in result.get("rooms", []):
+                accumulated.extend(r.get("tasks", []))
+            remaining -= batch
+        return room_name, accumulated
+
     if task_count > 40 or estimated_tokens > split_threshold:
         # Per-room calls (sequential) to avoid truncation on large task counts
         for room in rooms:
-            single_prompt = task_prompt_template.format(
-                room_list=f"- {room['name']}", task_count=task_count
-            )
-            raw2, _ = _gemini_call(client, models, [genai_types.Part(text=single_prompt)], max_tokens=8192)
-            raw2 = _strip_fences(raw2)
-            room_result = _try_parse(raw2)
-            for r in room_result.get("rooms", []):
-                tasks_by_name[r["name"]] = r.get("tasks", [])
+            name, tasks = _generate_room_tasks(room["name"])
+            tasks_by_name[name] = tasks
     else:
         room_list = "\n".join(f"- {r['name']}" for r in rooms)
         tasks_prompt = task_prompt_template.format(room_list=room_list, task_count=task_count)
