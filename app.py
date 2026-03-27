@@ -1062,6 +1062,36 @@ def randomize():
         return jsonify({"task": task})
 
 
+@app.route("/check-cache", methods=["POST"])
+def check_cache():
+    """Return cached settings for a URL if it exists with different task_count/mode."""
+    body       = request.get_json(force=True)
+    url        = (body.get("url") or "").strip()
+    task_count = int(body.get("task_count", 25))
+    mode       = body.get("mode", "tasks")
+
+    cache = _load_cache()
+    lid   = _listing_id(url)
+
+    for entry in cache.values():
+        entry_lid = _listing_id(entry.get("url", ""))
+        match = (lid and entry_lid == lid) or (_norm_url(entry.get("url", "")) == _norm_url(url))
+        if match:
+            cached_tc   = entry.get("task_count")
+            cached_mode = entry.get("mode")
+            if cached_tc != task_count or cached_mode != mode:
+                return jsonify({
+                    "found": True,
+                    "cached_task_count": cached_tc,
+                    "cached_mode": cached_mode,
+                    "address_hint": entry.get("address_hint", ""),
+                    "cached_at": entry.get("cached_at"),
+                })
+            break  # same settings → normal cache hit, no prompt needed
+
+    return jsonify({"found": False})
+
+
 @app.route("/cached-listings")
 def cached_listings():
     cache = _load_cache()

@@ -406,11 +406,41 @@ function setLoadingStep(step) {
   });
 }
 
-async function analyze() {
+function _modeLabel(mode) {
+  return mode === 'rearrange' ? 'Rearrange the room' : 'Room-specific tasks';
+}
+
+async function analyze(skipCacheCheck) {
   const url = document.getElementById('urlInput').value.trim();
   const taskCount = parseInt(document.getElementById('taskCountInput').value) || 25;
 
   if (!url) { showError('Please paste an Airbnb listing URL.'); return; }
+
+  // Check if this URL is cached with different settings
+  if (!skipCacheCheck) {
+    try {
+      const chkRes = await fetch('/check-cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, task_count: taskCount, mode: currentMode }),
+      });
+      const chkData = await chkRes.json();
+      if (chkData.found) {
+        // Show modal and stop — user must choose
+        document.getElementById('cacheModalTaskCount').textContent = chkData.cached_task_count;
+        document.getElementById('cacheModalMode').textContent = _modeLabel(chkData.cached_mode);
+        document.getElementById('cacheModalDate').textContent =
+          chkData.cached_at ? new Date(chkData.cached_at).toLocaleDateString() : '';
+        document.getElementById('cacheModalAddress').textContent =
+          chkData.address_hint ? ` · ${chkData.address_hint}` : '';
+        // Store cached settings so "Use existing" button can apply them
+        window._pendingCachedTaskCount = chkData.cached_task_count;
+        window._pendingCachedMode = chkData.cached_mode;
+        document.getElementById('cacheModal').classList.remove('hidden');
+        return;
+      }
+    } catch (_) { /* ignore check errors — just proceed */ }
+  }
 
   // UI state
   hideError();
@@ -926,6 +956,47 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   loadHistory();
 });
+
+// ── Cache mismatch modal handlers ─────────────────────────────────────────────
+
+function cacheModalUseExisting() {
+  document.getElementById('cacheModal').classList.add('hidden');
+  // Apply cached settings
+  document.getElementById('taskCountInput').value = window._pendingCachedTaskCount;
+  setMode(window._pendingCachedMode);
+  analyze(true);
+}
+
+function cacheModalNewSearch() {
+  document.getElementById('cacheModal').classList.add('hidden');
+  analyze(true);
+}
 </script>
+
+<!-- Cache mismatch modal -->
+<div id="cacheModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4">
+    <h2 class="text-lg font-bold text-gray-800 mb-2">Existing analysis found</h2>
+    <p class="text-sm text-gray-600 mb-1">
+      This listing was previously analyzed with
+      <span class="font-semibold text-gray-800"><span id="cacheModalTaskCount"></span> tasks</span>
+      in <span class="font-semibold text-gray-800"><span id="cacheModalMode"></span></span> mode.
+    </p>
+    <p class="text-xs text-gray-400 mb-6">
+      <span id="cacheModalDate"></span><span id="cacheModalAddress"></span>
+    </p>
+    <div class="flex gap-3">
+      <button onclick="cacheModalUseExisting()"
+        class="flex-1 brand-btn text-white text-sm font-semibold px-4 py-2.5 rounded-xl">
+        Use existing
+      </button>
+      <button onclick="cacheModalNewSearch()"
+        class="flex-1 border border-gray-300 text-gray-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-gray-50">
+        New search
+      </button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
