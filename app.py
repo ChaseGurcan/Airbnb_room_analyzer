@@ -40,10 +40,20 @@ def _load_cache():
     except Exception:
         return {}
 
+CACHE_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
 def _save_cache(cache):
     try:
+        payload = json.dumps(cache, indent=2)
+        # If over size limit, drop oldest entries until under limit
+        if len(payload.encode()) > CACHE_MAX_BYTES:
+            sorted_keys = sorted(cache, key=lambda k: cache[k].get("cached_at", 0))
+            while sorted_keys and len(payload.encode()) > CACHE_MAX_BYTES:
+                del cache[sorted_keys.pop(0)]
+                payload = json.dumps(cache, indent=2)
+            print(f"  [cache] pruned to {len(cache)} entries to stay under {CACHE_MAX_BYTES // 1024 // 1024}MB")
         with open(CACHE_FILE, "w") as f:
-            json.dump(cache, f, indent=2)
+            f.write(payload)
     except Exception as e:
         print(f"  [warn] cache save failed: {e}")
 
