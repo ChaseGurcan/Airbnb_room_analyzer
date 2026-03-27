@@ -320,7 +320,8 @@
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
 let currentJobId = null;
-let roomTasksMap = {};   // roomName -> full task array
+let roomTasksMap = {};        // roomName -> full task array
+let roomShownTasksMap = {};   // roomName -> Set of task names already shown
 let taskCountSetting = 25;
 let currentMode = 'tasks';  // 'rearrange' | 'tasks'
 let selectedFiles = [];  // FileList/array for upload mode
@@ -528,6 +529,7 @@ function renderResults(data, elapsed) {
 
   // Store full task lists, task count, and mode for offline randomization
   roomTasksMap = {};
+  roomShownTasksMap = {};
   taskCountSetting = analysis.task_count || parseInt(document.getElementById('taskCountInput').value) || 25;
   currentMode = analysis.mode || 'tasks';
   rooms.forEach(room => { roomTasksMap[room.name] = room.tasks || []; });
@@ -672,9 +674,14 @@ function randomizeTasks(btn, roomName) {
 
   } else {
     // Steps mode: pick 3-5 tasks, order them via Gemini, show each with steps
-    const shownNames = new Set([...taskList.querySelectorAll('[data-task-name]')].map(el => el.dataset.taskName));
-    let available = allTasks.filter(t => !shownNames.has(t.name));
-    if (available.length === 0) available = allTasks;
+    if (!roomShownTasksMap[roomName]) roomShownTasksMap[roomName] = new Set();
+    const shown = roomShownTasksMap[roomName];
+    let available = allTasks.filter(t => !shown.has(t.name));
+    if (available.length < 5) {
+      // Pool exhausted — reset and use full list
+      shown.clear();
+      available = [...allTasks];
+    }
 
     // Shuffle and pick 3-5
     const pool = [...available];
@@ -684,6 +691,7 @@ function randomizeTasks(btn, roomName) {
     }
     const count    = Math.min(5, pool.length);
     const picked   = pool.slice(0, count);
+    picked.forEach(t => shown.add(t.name));
     const taskMap  = Object.fromEntries(picked.map(t => [t.name, t]));
 
     // Show loading state on button
