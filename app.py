@@ -57,6 +57,25 @@ def _cache_lookup(url, task_count, mode):
     # Fallback: normalized URL
     return cache.get(_cache_key(_norm_url(url), task_count, mode))
 
+def _prune_lower_counts(cache, url, task_count, mode):
+    """Remove any entries for the same listing+mode that have fewer tasks than task_count."""
+    lid = _listing_id(url)
+    norm = _norm_url(url)
+    to_delete = []
+    for key, entry in cache.items():
+        if entry.get("mode") != mode:
+            continue
+        entry_tc = entry.get("task_count", 0)
+        if entry_tc >= task_count:
+            continue
+        entry_lid = _listing_id(entry.get("url", ""))
+        entry_norm = _norm_url(entry.get("url", ""))
+        same = (lid and entry_lid == lid) or (entry_norm == norm)
+        if same:
+            to_delete.append(key)
+    for k in to_delete:
+        del cache[k]
+
 def _cache_store(url, task_count, mode, job_result, address_hint):
     cache = _load_cache()
     entry = {
@@ -71,6 +90,7 @@ def _cache_store(url, task_count, mode, job_result, address_hint):
     if lid:
         cache[_cache_key(lid, task_count, mode)] = entry
     cache[_cache_key(_norm_url(url), task_count, mode)] = entry
+    _prune_lower_counts(cache, url, task_count, mode)
     _save_cache(cache)
 
 
