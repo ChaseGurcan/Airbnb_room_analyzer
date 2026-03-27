@@ -682,7 +682,7 @@ function randomizeTasks(btn, roomName) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-    const count    = Math.min(3 + Math.floor(Math.random() * 3), pool.length); // 3-5
+    const count    = Math.min(5, pool.length);
     const picked   = pool.slice(0, count);
     const taskMap  = Object.fromEntries(picked.map(t => [t.name, t]));
 
