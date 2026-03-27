@@ -128,7 +128,10 @@
     </div>
   </header>
 
-  <main class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+  <main class="max-w-7xl mx-auto px-4 py-8">
+  <div class="flex gap-6 items-start">
+  <!-- ── Left: main content ── -->
+  <div class="flex-1 min-w-0 space-y-6">
 
     <!-- Input Card -->
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -305,6 +308,19 @@
       </p>
     </div>
 
+  </div><!-- end main content -->
+
+  <!-- ── Right: history sidebar ── -->
+  <div class="w-72 shrink-0 hidden lg:block" style="position:sticky;top:72px;max-height:calc(100vh - 88px);overflow-y:auto;">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+      <h3 class="font-semibold text-gray-700 text-sm mb-3">🏘 Previously Analyzed</h3>
+      <div id="historyList" class="space-y-3">
+        <p class="text-xs text-gray-400">No listings yet.</p>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- end flex row -->
   </main>
 
   <!-- Print styles -->
@@ -438,6 +454,7 @@ async function analyze() {
         currentJobId = jobId;
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         renderResults(pollData, elapsed);
+        loadHistory();
         break;
       }
     }
@@ -861,12 +878,53 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ── History sidebar ──────────────────────────────────────────────────────────
+
+async function loadHistory() {
+  try {
+    const res  = await fetch('/cached-listings');
+    const list = await res.json();
+    const el   = document.getElementById('historyList');
+    if (!list.length) return;
+    el.innerHTML = list.map(item => {
+      const date = item.cached_at
+        ? new Date(item.cached_at * 1000).toLocaleDateString()
+        : '';
+      const img = item.first_image
+        ? `<img src="${escHtml(item.first_image)}" class="w-full h-24 object-cover rounded-lg mb-2" loading="lazy" />`
+        : `<div class="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🏠</div>`;
+      const addr = escHtml(item.address_hint || item.url || 'Unknown listing');
+      const mode = item.mode === 'rearrange' ? '🔀' : '✅';
+      const dataAttr = escHtml(JSON.stringify(item));
+      return `
+        <button data-item="${dataAttr}" onclick="loadFromHistory(this)"
+          class="w-full text-left hover:bg-gray-50 rounded-xl p-2 transition-colors border border-gray-100">
+          ${img}
+          <p class="text-xs font-medium text-gray-700 leading-snug line-clamp-2">${addr}</p>
+          <p class="text-xs text-gray-400 mt-0.5">${date} · ${item.room_count} rooms ${mode}</p>
+        </button>`;
+    }).join('');
+  } catch (e) {
+    console.warn('Could not load history', e);
+  }
+}
+
+function loadFromHistory(btn) {
+  const item = JSON.parse(btn.dataset.item);
+  switchTab('url');
+  document.getElementById('urlInput').value = item.url;
+  document.getElementById('taskCountInput').value = item.task_count;
+  setMode(item.mode || 'tasks');
+  analyze();
+}
+
 // ── Enter key shortcut ───────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('urlInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') analyze();
   });
+  loadHistory();
 });
 </script>
 </body>

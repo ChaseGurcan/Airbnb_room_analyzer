@@ -1062,6 +1062,38 @@ def randomize():
         return jsonify({"task": task})
 
 
+@app.route("/cached-listings")
+def cached_listings():
+    cache = _load_cache()
+    seen = set()
+    listings = []
+    for entry in sorted(cache.values(), key=lambda x: x.get("cached_at", 0), reverse=True):
+        url = entry.get("url", "")
+        dedup = _listing_id(url) or url
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        first_image = None
+        rooms = entry.get("job_result", {}).get("data", {}).get("rooms", [])
+        for room in rooms:
+            for u in room.get("photo_urls", []):
+                if u and not str(u).startswith("upload_"):
+                    first_image = u
+                    break
+            if first_image:
+                break
+        listings.append({
+            "url": url,
+            "address_hint": entry.get("address_hint", ""),
+            "cached_at": entry.get("cached_at"),
+            "first_image": first_image,
+            "room_count": len(rooms),
+            "task_count": entry.get("task_count", 25),
+            "mode": entry.get("mode", "tasks"),
+        })
+    return jsonify(listings[:20])
+
+
 @app.route("/order-tasks", methods=["POST"])
 def order_tasks():
     body       = request.get_json(force=True)
