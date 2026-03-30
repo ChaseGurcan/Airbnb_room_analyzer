@@ -924,14 +924,15 @@ async function loadHistory() {
         ? `<img src="${escHtml(item.first_image)}" class="w-full h-24 object-cover rounded-lg mb-2" loading="lazy" />`
         : `<div class="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🏠</div>`;
       const addr = escHtml(item.address_hint || item.url || 'Unknown listing');
-      const mode = item.mode === 'rearrange' ? '🔀' : '✅';
+      const modeLabel = item.mode === 'rearrange' ? 'Rearrange' : 'Room tasks';
+      const modeBadge = `<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${item.mode === 'rearrange' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}">${modeLabel}</span>`;
       const dataAttr = escHtml(JSON.stringify(item));
       return `
         <button data-item="${dataAttr}" onclick="loadFromHistory(this)"
           class="w-full text-left hover:bg-gray-50 rounded-xl p-2 transition-colors border border-gray-100">
           ${img}
           <p class="text-xs font-medium text-gray-700 leading-snug line-clamp-2">${addr}</p>
-          <p class="text-xs text-gray-400 mt-0.5">${date} · ${item.room_count} rooms ${mode}</p>
+          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1">${date} · ${item.room_count} rooms ${modeBadge}</p>
         </button>`;
     }).join('');
   } catch (e) {

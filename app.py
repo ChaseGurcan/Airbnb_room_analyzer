@@ -1129,7 +1129,8 @@ def cached_listings():
     listings = []
     for entry in sorted(cache.values(), key=lambda x: x.get("cached_at", 0), reverse=True):
         url = entry.get("url", "")
-        dedup = _listing_id(url) or url
+        mode = entry.get("mode", "tasks")
+        dedup = (_listing_id(url) or url, mode)
         if dedup in seen:
             continue
         seen.add(dedup)
