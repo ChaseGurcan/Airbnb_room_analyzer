@@ -1104,20 +1104,20 @@ def check_cache():
     lid   = _listing_id(url)
 
     for entry in cache.values():
-        entry_lid = _listing_id(entry.get("url", ""))
-        match = (lid and entry_lid == lid) or (_norm_url(entry.get("url", "")) == _norm_url(url))
-        if match:
-            cached_tc   = entry.get("task_count")
-            cached_mode = entry.get("mode")
-            if cached_tc != task_count or cached_mode != mode:
+        entry_lid  = _listing_id(entry.get("url", ""))
+        same_url   = (lid and entry_lid == lid) or (_norm_url(entry.get("url", "")) == _norm_url(url))
+        same_mode  = entry.get("mode") == mode
+        if same_url and same_mode:
+            cached_tc = entry.get("task_count")
+            if cached_tc != task_count:
                 return jsonify({
                     "found": True,
                     "cached_task_count": cached_tc,
-                    "cached_mode": cached_mode,
+                    "cached_mode": mode,
                     "address_hint": entry.get("address_hint", ""),
                     "cached_at": entry.get("cached_at"),
                 })
-            break  # same settings → normal cache hit, no prompt needed
+            break  # same URL + mode + count → normal cache hit, no prompt needed
 
     return jsonify({"found": False})
 
